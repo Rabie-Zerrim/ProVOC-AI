@@ -1,0 +1,20 @@
+# Environnement virtuel
+venv/
+env/
+ENV/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Base de données locales
+*.db
+*.sqlite3
+*.db.lock
+
+# Configuration sensible
+.env
+
+# Logs
+*.log
