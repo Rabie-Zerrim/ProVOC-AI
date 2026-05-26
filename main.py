@@ -1,40 +1,34 @@
 import os
-import uuid
-import whisper
-import torch
 import time
-from fastapi import FastAPI, UploadFile, File, Depends, HTTPException, status
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from openai import OpenAI
 from dotenv import load_dotenv
-from datetime import datetime
 
+load_dotenv()
+
+import config
 from database import get_milvus
-from config import OPENAI_API_KEY, JWT_SECRET, ALGORITHM
-
-# Import routers
-from auth import router as auth_router, get_current_user
+from auth import router as auth_router
 from yelp import router as yelp_router
 from lists import router as lists_router
 from memos import router as memos_router
 from tasks import router as tasks_router
+from chat import router as chat_router
+from transcription import router as transcription_router
 
-load_dotenv()
-
-from groq import Groq
-from config import GROQ_API_KEY
-client_ai = Groq(api_key=GROQ_API_KEY)
 milvus_client = get_milvus()
 
-# Whisper Model
-device = "cuda" if torch.cuda.is_available() else "cpu"
-print(f"Loading Whisper on {device}...")
-whisper_model = whisper.load_model("tiny").to(device)
+app = FastAPI(title="PV-AI Backend")
 
-app = FastAPI(title="Focusaurus LIGHT-MODE (Zero-DB) Backend")
+# CORS — registered before routers
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[o.strip() for o in os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(",")],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-from fastapi import Request
-import time
 
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
@@ -45,14 +39,54 @@ async def log_requests(request: Request, call_next):
     print(f"DEBUG: Finished {request.method} {request.url.path} in {process_time:.2f}s with status {response.status_code}")
     return response
 
-@app.get("/api/health-check/transcribe")
-async def health_check():
+
+@app.get("/")
+async def root():
+    return {"message": "PV-AI API", "docs": "/docs", "health": "/health"}
+
+
+@app.get("/health")
+async def health():
+    from transcription import whisper_model
+
+    # DB check
+    if config.NO_DB_MODE:
+        db_status = "mock"
+    else:
+        try:
+            from database import engine
+            from sqlalchemy import text
+            async with engine.connect() as conn:
+                await conn.execute(text("SELECT 1"))
+            db_status = "connected"
+        except Exception as exc:
+            db_status = f"error: {exc}"
+
+    # Redis check
+    try:
+        import redis as _redis
+        r = _redis.Redis(
+            host=config.REDIS_HOST,
+            port=config.REDIS_PORT,
+            decode_responses=True,
+            socket_connect_timeout=2,
+        )
+        r.ping()
+        redis_status = "connected"
+    except Exception as exc:
+        redis_status = f"error: {exc}"
+
+    # Whisper check
+    whisper_status = "loaded" if whisper_model is not None else "not loaded"
+
     return {
-        "status": "ok", 
-        "whisper": "ready", 
-        "device": str(device),
-        "db_mode": "no-database-mock"
+        "status": "ok",
+        "db": db_status,
+        "redis": redis_status,
+        "whisper": whisper_status,
+        "mode": "NO_DB_MODE" if config.NO_DB_MODE else "live",
     }
+
 
 # Register Routers
 app.include_router(auth_router)
@@ -60,74 +94,9 @@ app.include_router(yelp_router)
 app.include_router(lists_router)
 app.include_router(memos_router)
 app.include_router(tasks_router)
+app.include_router(chat_router)
+app.include_router(transcription_router)
 
-# CORS PROMISCUOUS MODE FOR TESTING
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# AI Assistant Logic
-async def analyze_with_gpt(prompt: str, context: str = ""):
-    try:
-        response = client_ai.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[
-                {"role": "system", "content": "You are a helpful AI assistant for Focusaurus."},
-                {"role": "user", "content": f"{context}\n\nTask: {prompt}"}
-            ],
-            temperature=0.7,
-            max_tokens=300
-        )
-        return response.choices[0].message.content
-    except Exception as e:
-        return f"AI Response (Placeholder): {prompt[:50]}..."
-
-# Routes
-from fastapi import Form
-
-@app.post("/api/transcribe")
-async def transcribe_audio(
-    audio: UploadFile = File(...), 
-    language: str = Form("auto"),
-    task: str = Form("transcribe")
-):
-    temp_filename = f"temp_{uuid.uuid4()}.webm"
-    try:
-        with open(temp_filename, "wb") as buffer:
-            content = await audio.read()
-            buffer.write(content)
-        
-        options = {}
-        if language != "auto": options["language"] = language
-        options["task"] = task
-        
-        print(f"Whisper processing: lang={language}, task={task}")
-        result = whisper_model.transcribe(temp_filename, **options)
-        return {
-            "success": True, 
-            "transcription": result["text"].strip(),
-            "language": result.get("language", "unknown")
-        }
-    except Exception as e:
-        print(f"Whisper Error: {e}")
-        return {"success": False, "error": str(e)}
-    finally:
-        if os.path.exists(temp_filename):
-            os.remove(temp_filename)
-
-@app.get("/api/pending-reviews")
-async def get_root_pending_reviews():
-    """MODE NO-DB : Retourne une liste vide pour éviter les erreurs segcore"""
-    return []
-
-@app.post("/api/record-review")
-async def record_root_review(businessId: str, businessName: str, reviewText: str):
-    """MODE NO-DB : Succès automatique"""
-    return {"success": True, "reviewId": str(uuid.uuid4())}
 
 if __name__ == "__main__":
     import uvicorn

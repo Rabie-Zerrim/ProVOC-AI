@@ -14,3 +14,19 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 # Security context
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+# Language settings
+ACCEPTED_LANGUAGES = ["en", "es", "fr"]
+LANGUAGE_NAMES = {"en": "English", "es": "Spanish", "fr": "French"}
+
+# Runtime configuration
+WHISPER_MODEL = os.getenv("WHISPER_MODEL", "tiny")
+LLM_MODEL = os.getenv("LLM_MODEL", "llama-3.3-70b-versatile")
+REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
+REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
+
+# Database configuration
+DATABASE_URL = os.getenv("DATABASE_URL")
+DATABASE_URL_SYNC = os.getenv("DATABASE_URL_SYNC")
+NO_DB_MODE = os.getenv("NO_DB_MODE", "true").lower() == "true"
+BFF_SHARED_SECRET = os.getenv("BFF_SHARED_SECRET")

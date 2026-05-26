@@ -1,9 +1,12 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import Column, String, Boolean, Integer, Float, DateTime, ForeignKey, JSON, Enum
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 from database import Base
+
+USERS_ID_COLUMN = "Users.id"
+TASKS_ID_COLUMN = "Tasks.id"
 
 class User(Base):
     __tablename__ = "Users"
@@ -13,14 +16,15 @@ class User(Base):
     password = Column(String, nullable=False)
     name = Column(String, nullable=True)
     avatar = Column(String, nullable=True)
-    createdAt = Column(DateTime, default=datetime.utcnow)
-    updatedAt = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    createdAt = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    updatedAt = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), onupdate=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
     # Relationships
     lists = relationship("List", back_populates="user")
     tasks = relationship("Task", back_populates="user")
     memos = relationship("Memo", back_populates="user")
     yelpReviews = relationship("YelpReview", back_populates="user")
+    credential = relationship("UserCredential", back_populates="user", uselist=False)
 
 class List(Base):
     __tablename__ = "Lists"
@@ -29,9 +33,9 @@ class List(Base):
     color = Column(String, default="#3B82F6")
     icon = Column(String, default="📋")
     sortOrder = Column(Integer, default=0)
-    userId = Column(UUID(as_uuid=True), ForeignKey("Users.id"), nullable=False)
-    createdAt = Column(DateTime, default=datetime.utcnow)
-    updatedAt = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    userId = Column(UUID(as_uuid=True), ForeignKey(USERS_ID_COLUMN), nullable=False)
+    createdAt = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    updatedAt = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), onupdate=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
     user = relationship("User", back_populates="lists")
     tasks = relationship("Task", back_populates="list")
@@ -49,9 +53,9 @@ class Task(Base):
     sortOrder = Column(Integer, default=0)
     recurring = Column(JSONB, default={})
     listId = Column(UUID(as_uuid=True), ForeignKey("Lists.id"), nullable=True)
-    userId = Column(UUID(as_uuid=True), ForeignKey("Users.id"), nullable=False)
-    createdAt = Column(DateTime, default=datetime.utcnow)
-    updatedAt = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    userId = Column(UUID(as_uuid=True), ForeignKey(USERS_ID_COLUMN), nullable=False)
+    createdAt = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    updatedAt = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), onupdate=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
     user = relationship("User", back_populates="tasks")
     list = relationship("List", back_populates="tasks")
@@ -65,10 +69,10 @@ class Subtask(Base):
     title = Column(String, nullable=False)
     completed = Column(Boolean, default=False)
     sortOrder = Column(Integer, default=0)
-    taskId = Column(UUID(as_uuid=True), ForeignKey("Tasks.id"), nullable=False)
-    userId = Column(UUID(as_uuid=True), ForeignKey("Users.id"), nullable=False)
-    createdAt = Column(DateTime, default=datetime.utcnow)
-    updatedAt = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    taskId = Column(UUID(as_uuid=True), ForeignKey(TASKS_ID_COLUMN), nullable=False)
+    userId = Column(UUID(as_uuid=True), ForeignKey(USERS_ID_COLUMN), nullable=False)
+    createdAt = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    updatedAt = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), onupdate=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
     task = relationship("Task", back_populates="subtasks")
 
@@ -77,25 +81,25 @@ class Note(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     content = Column(String, nullable=False)
     links = Column(JSONB, default=[])
-    taskId = Column(UUID(as_uuid=True), ForeignKey("Tasks.id"), nullable=True)
-    userId = Column(UUID(as_uuid=True), ForeignKey("Users.id"), nullable=False)
-    createdAt = Column(DateTime, default=datetime.utcnow)
-    updatedAt = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    taskId = Column(UUID(as_uuid=True), ForeignKey(TASKS_ID_COLUMN), nullable=True)
+    userId = Column(UUID(as_uuid=True), ForeignKey(USERS_ID_COLUMN), nullable=False)
+    createdAt = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    updatedAt = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), onupdate=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
     task = relationship("Task", back_populates="notes")
 
 class Session(Base):
     __tablename__ = "Sessions"
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    startTime = Column(DateTime, default=datetime.utcnow)
+    startTime = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
     endTime = Column(DateTime, nullable=True)
     duration = Column(Integer, default=0)
     isActive = Column(Boolean, default=True)
     notes = Column(String, default="")
-    taskId = Column(UUID(as_uuid=True), ForeignKey("Tasks.id"), nullable=False)
-    userId = Column(UUID(as_uuid=True), ForeignKey("Users.id"), nullable=False)
-    createdAt = Column(DateTime, default=datetime.utcnow)
-    updatedAt = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    taskId = Column(UUID(as_uuid=True), ForeignKey(TASKS_ID_COLUMN), nullable=False)
+    userId = Column(UUID(as_uuid=True), ForeignKey(USERS_ID_COLUMN), nullable=False)
+    createdAt = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    updatedAt = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), onupdate=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
     task = relationship("Task", back_populates="sessions")
 
@@ -110,9 +114,9 @@ class Memo(Base):
     isPinned = Column(Boolean, default=False)
     isArchived = Column(Boolean, default=False)
     rotation = Column(Float, default=0.0)
-    userId = Column(UUID(as_uuid=True), ForeignKey("Users.id"), nullable=False)
-    createdAt = Column(DateTime, default=datetime.utcnow)
-    updatedAt = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    userId = Column(UUID(as_uuid=True), ForeignKey(USERS_ID_COLUMN), nullable=False)
+    createdAt = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    updatedAt = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), onupdate=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
     user = relationship("User", back_populates="memos")
 
@@ -133,13 +137,13 @@ class YelpBusiness(Base):
     imageUrl = Column(String, nullable=True)
     hours = Column(JSONB, default={"monday": "", "tuesday": "", "wednesday": "", "thursday": "", "friday": "", "saturday": "", "sunday": ""})
     isMock = Column(Boolean, default=True)
-    createdAt = Column(DateTime, default=datetime.utcnow)
-    updatedAt = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    createdAt = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    updatedAt = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), onupdate=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
 class YelpReview(Base):
     __tablename__ = "YelpReviews"
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    userId = Column(UUID(as_uuid=True), ForeignKey("Users.id"), nullable=False)
+    userId = Column(UUID(as_uuid=True), ForeignKey(USERS_ID_COLUMN), nullable=False)
     businessId = Column(String, nullable=False)
     businessName = Column(String, nullable=False)
     businessAddress = Column(String, nullable=True)
@@ -160,7 +164,19 @@ class YelpReview(Base):
     postedDate = Column(DateTime, nullable=True)
     chatHistory = Column(JSONB, default=[])
     status = Column(Enum("draft", "review_chat", "enhancing", "preview", "posted", name="review_status"), default="draft")
-    createdAt = Column(DateTime, default=datetime.utcnow)
-    updatedAt = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    createdAt = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    updatedAt = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), onupdate=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
     user = relationship("User", back_populates="yelpReviews")
+
+
+class UserCredential(Base):
+    __tablename__ = "user_credentials"
+    credential_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("Users.id"), nullable=False, unique=True)
+    email = Column(String, nullable=False, unique=True)
+    password_hash = Column(String, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), onupdate=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+
+    user = relationship("User", back_populates="credential")

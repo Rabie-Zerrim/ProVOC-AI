@@ -4,6 +4,7 @@ pydantic==2.6.1
 pydantic-settings==2.1.0
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
+bcrypt
 python-multipart==0.0.9
 openai
 torch
@@ -16,3 +17,12 @@ milvus-lite
 requests
 python-slugify
 groq
+sqlalchemy
+asyncpg
+alembic
+redis
+openai-whisper
+transformers
+datasets
+jiwer
+mlflow
