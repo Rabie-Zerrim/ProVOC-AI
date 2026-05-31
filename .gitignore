@@ -18,3 +18,8 @@ __pycache__/
 
 # Logs
 *.log
+server.err
+server.out
+
+# ML models
+whisper-provoc-small/

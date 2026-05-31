@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Focusaurus - AI Review Assistant</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f0f2f5;
+            min-height: 100vh;
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+        .header h1 { font-size: 24px; margin-bottom: 5px; }
+        .header p { opacity: 0.9; font-size: 14px; }
+        
+        .container { max-width: 800px; margin: 20px auto; padding: 0 15px; }
+        
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        .tab {
+            padding: 12px 24px;
+            background: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            color: #666;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            transition: all 0.2s;
+        }
+        .tab:hover { background: #f8f9fa; }
+        .tab.active {
+            background: #667eea;
+            color: white;
+        }
+        
+        .card {
+            background: white;
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+        
+        .form-group { margin-bottom: 16px; }
+        label { display: block; margin-bottom: 6px; font-weight: 600; color: #333; font-size: 14px; }
+        input, select, textarea {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border-color 0.2s;
+        }
+        input:focus, select:focus, textarea:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        button {
+            padding: 12px 24px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        button:hover { background: #5568d3; }
+        button:disabled { background: #ccc; cursor: not-allowed; }
+        
+        .btn-secondary { background: #6c757d; }
+        .btn-secondary:hover { background: #5a6268; }
+        
+        .record-section {
+            border: 2px dashed #e0e0e0;
+            padding: 30px;
+            border-radius: 12px;
+            text-align: center;
+            margin-bottom: 16px;
+        }
+        .record-section.recording {
+            border-color: #ef4444;
+            background: #fef2f2;
+        }
+        .btn-group { display: flex; gap: 10px; justify-content: center; margin-top: 15px; }
+        
+        .result {
+            padding: 16px;
+            border-radius: 8px;
+            margin-top: 16px;
+            white-space: pre-wrap;
+            display: none;
+        }
+        .result.success { background: #d1fae5; color: #065f46; }
+        .result.error { background: #fee2e2; color: #991b1b; }
+        .result.info { background: #e0f2fe; color: #075985; }
+        
+        .chat-container {
+            max-height: 400px;
+            overflow-y: auto;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 16px;
+        }
+        .chat-message {
+            margin-bottom: 12px;
+            padding: 12px;
+            border-radius: 8px;
+        }
+        .chat-message.user {
+            background: #e8f0fe;
+            margin-left: 40px;
+        }
+        .chat-message.assistant {
+            background: #f3e8ff;
+            margin-right: 40px;
+        }
+        .chat-message .role {
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 4px;
+        }
+        
+        .business-list { margin-top: 16px; }
+        .business-item {
+            padding: 12px;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            margin-bottom: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .business-item:hover { border-color: #667eea; background: #f8f9ff; }
+        
+        .step { margin-bottom: 20px; padding-bottom: 20px; border-bottom: 1px solid #e0e0e0; }
+        .step:last-child { border-bottom: none; }
+        
+        .loading { text-align: center; color: #666; display: none; }
+        .spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 2px solid #ccc;
+            border-top-color: #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🎯 Focusaurus AI</h1>
+        <p>Create perfect business reviews with AI assistance</p>
+    </div>
+    
+    <div class="container">
+        <div class="tabs">
+            <button class="tab active" onclick="switchTab('transcribe')">🎤 Transcribe</button>
+            <button class="tab" onclick="switchTab('search')">🔍 Search</button>
+            <button class="tab" onclick="switchTab('review')">💬 Review Chat</button>
+        </div>
+        
+        <!-- TRANSCRIBE TAB -->
+        <div id="tab-transcribe" class="tab-content">
+            <div class="card">
+                <h3>🎙️ Voice Transcription</h3>
+                <div class="form-group">
+                    <label>Whisper Model (larger = more accurate)</label>
+                    <select id="whisperModel">
+                        <option value="tiny">tiny (fastest, least accurate)</option>
+                        <option value="base">base</option>
+                        <option value="small">small</option>
+                        <option value="medium">medium (recommended)</option>
+                        <option value="large">large (most accurate)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Language</label>
+                    <select id="language">
+                        <option value="auto">Auto Detect</option>
+                        <option value="en">English</option>
+                        <option value="es">Español</option>
+                        <option value="fr">Français</option>
+                    </select>
+                </div>
+                
+                <div class="record-section" id="recordSection">
+                    <p>Record your review or upload audio</p>
+                    <div class="btn-group">
+                        <button class="record" id="recordBtn" onclick="startRecording()">🎙️ Start Recording</button>
+                        <button class="stop" id="stopBtn" onclick="stopRecording()" disabled>⏹️ Stop</button>
+                    </div>
+                    <p id="recordStatus" style="margin-top: 10px; color: #666;"></p>
+                </div>
+                
+                <div class="form-group">
+                    <label>Or upload audio file</label>
+                    <input type="file" id="audioFile" accept="audio/*">
+                </div>
+                
+                <button onclick="transcribeAudio()" id="transcribeBtn">Transcribe</button>
+                <div class="loading" id="transcribeLoading">
+                    <span class="spinner"></span> Processing...
+                </div>
+                <div id="transcribeResult" class="result"></div>
+            </div>
+        </div>
+        
+        <!-- SEARCH TAB -->
+        <div id="tab-search" class="tab-content" style="display: none;">
+            <div class="card">
+                <h3>🔍 Search Businesses</h3>
+                <div class="form-group">
+                    <label>Search for a business</label>
+                    <input type="text" id="searchTerm" placeholder="e.g., McDonalds, Starbucks, Pizza...">
+                </div>
+                <button onclick="searchBusinesses()">Search</button>
+                <div class="business-list" id="businessList"></div>
+            </div>
+        </div>
+        
+        <!-- REVIEW CHAT TAB -->
+        <div id="tab-review" class="tab-content" style="display: none;">
+            <div class="card">
+                <h3>💬 AI Review Assistant</h3>
+                <p style="color: #666; margin-bottom: 16px; font-size: 14px;">
+                    Chat with AI to create, improve, and finalize your business review.
+                </p>
+                
+                <div class="step">
+                    <div class="form-group">
+                        <label>1. Select or create a review session</label>
+                        <div class="btn-group" style="justify-content: flex-start;">
+                            <button onclick="createReviewSession()">+ New Session</button>
+                        </div>
+                        <p id="sessionId" style="margin-top: 8px; color: #666; font-size: 13px;"></p>
+                    </div>
+                </div>
+                
+                <div class="step">
+                    <div class="form-group">
+                        <label>2. Add your transcription</label>
+                        <textarea id="chatTranscription" rows="3" placeholder="Paste your transcribed review here..."></textarea>
+                        <button class="btn-secondary" onclick="sendTranscriptionToChat()" style="margin-top: 8px;">Add to Chat</button>
+                    </div>
+                </div>
+                
+                <div class="step">
+                    <label>3. Chat with AI</label>
+                    <div class="chat-container" id="chatContainer">
+                        <div style="text-align: center; color: #999; padding: 20px;">
+                            Start a conversation with AI to improve your review...
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <input type="text" id="chatInput" placeholder="Type your message (e.g., 'Make it more professional', 'Generate final report')...">
+                    </div>
+                    <button onclick="sendChatMessage()">Send</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = 'http://localhost:5000';
+        
+        // State
+        let mediaRecorder;
+        let audioChunks = [];
+        let recordedBlob = null;
+        let currentReviewId = null;
+        let chatHistory = [];
+        
+        // Tab switching
+        function switchTab(tab) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.style.display = 'none');
+            document.querySelector(`.tab:nth-child(${tab === 'transcribe' ? 1 : tab === 'search' ? 2 : 3})`).classList.add('active');
+            document.getElementById(`tab-${tab}`).style.display = 'block';
+        }
+        
+        // Recording
+        async function startRecording() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRecorder = new MediaRecorder(stream);
+                audioChunks = [];
+                
+                mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
+                mediaRecorder.onstop = () => {
+                    recordedBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                    document.getElementById('recordStatus').textContent = '✅ Recording saved! Click Transcribe.';
+                    document.getElementById('transcribeBtn').disabled = false;
+                };
+                
+                mediaRecorder.start();
+                document.getElementById('recordBtn').textContent = '🔴 Recording...';
+                document.getElementById('stopBtn').disabled = false;
+                document.getElementById('recordSection').classList.add('recording');
+                document.getElementById('recordStatus').textContent = '🔴 Recording...';
+            } catch (e) {
+                showResult('transcribeResult', `❌ Mic error: ${e.message}`, 'error');
+            }
+        }
+        
+        function stopRecording() {
+            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                mediaRecorder.stop();
+                mediaRecorder.stream.getTracks().forEach(t => t.stop());
+                document.getElementById('recordBtn').textContent = '🎙️ Start Recording';
+                document.getElementById('stopBtn').disabled = true;
+                document.getElementById('recordSection').classList.remove('recording');
+            }
+        }
+        
+        // Transcription
+        async function transcribeAudio() {
+            const audioFile = document.getElementById('audioFile').files[0];
+            const language = document.getElementById('language').value;
+            const model = document.getElementById('whisperModel').value;
+            
+            if (!audioFile && !recordedBlob) {
+                showResult('transcribeResult', 'Please record or upload audio first', 'error');
+                return;
+            }
+            
+            document.getElementById('transcribeLoading').style.display = 'block';
+            document.getElementById('transcribeResult').style.display = 'none';
+            
+            const formData = new FormData();
+            formData.append('audio', recordedBlob || audioFile);
+            formData.append('language', language);
+            formData.append('task', 'transcribe');
+            
+            try {
+                const response = await fetch(`${API_URL}/api/transcribe`, {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await response.json();
+                
+                if (data.success) {
+                    showResult('transcribeResult', 
+                        `✅ Transcription:\n\n"${data.transcription}"\n\nDetected: ${data.language}`, 
+                        'success');
+                    // Store for chat
+                    document.getElementById('chatTranscription').value = data.transcription;
+                } else {
+                    showResult('transcribeResult', `⚠️ ${data.error}`, 'error');
+                }
+            } catch (e) {
+                showResult('transcribeResult', `❌ Error: ${e.message}`, 'error');
+            }
+            
+            document.getElementById('transcribeLoading').style.display = 'none';
+        }
+        
+        // Search businesses
+        async function searchBusinesses() {
+            const term = document.getElementById('searchTerm').value;
+            const list = document.getElementById('businessList');
+            list.innerHTML = '<div class="loading" style="display:block;">Searching...</div>';
+            
+            try {
+                const res = await fetch(`${API_URL}/api/yelp/search?term=${encodeURIComponent(term)}`);
+                const businesses = await res.json();
+                
+                if (businesses.length === 0) {
+                    list.innerHTML = '<p style="color:#666;">No businesses found</p>';
+                } else {
+                    list.innerHTML = businesses.map(b => `
+                        <div class="business-item" onclick="selectBusiness('${b.id}', '${b.name}')">
+                            <strong>${b.name}</strong><br>
+                            <small>${b.category} • ${b.address}</small>
+                        </div>
+                    `).join('');
+                }
+            } catch (e) {
+                list.innerHTML = `<p style="color:red;">Error: ${e.message}</p>`;
+            }
+        }
+        
+        function selectBusiness(id, name) {
+            alert(`Selected: ${name}\nNow go to Review Chat tab to create a session`);
+        }
+        
+        // Review session
+        async function createReviewSession() {
+            try {
+                const res = await fetch(`${API_URL}/api/yelp/reviews`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({})
+                });
+                const data = await res.json();
+                currentReviewId = data.id || data._id;
+                document.getElementById('sessionId').textContent = `Session: ${currentReviewId}`;
+                
+                // Initialize chat with welcome message
+                chatHistory = [];
+                updateChatDisplay();
+                addChatMessage('assistant', '👋 Hello! I\'m your AI review assistant. Please share your experience about the business, and I\'ll help you create a perfect review. You can: describe your experience, ask me to improve your text, or request a final report.');
+            } catch (e) {
+                alert('Error: ' + e.message);
+            }
+        }
+        
+        function sendTranscriptionToChat() {
+            const text = document.getElementById('chatTranscription').value;
+            if (!text) {
+                alert('Please add some transcription first');
+                return;
+            }
+            if (!currentReviewId) {
+                alert('Please create a session first');
+                return;
+            }
+            
+            chatHistory.push({role: 'user', content: text});
+            addChatMessage('user', text);
+            processChatResponse();
+        }
+        
+        async function sendChatMessage() {
+            const input = document.getElementById('chatInput');
+            const message = input.value.trim();
+            if (!message || !currentReviewId) return;
+            
+            chatHistory.push({role: 'user', content: message});
+            addChatMessage('user', message);
+            input.value = '';
+            
+            await processChatResponse();
+        }
+        
+        async function processChatResponse() {
+            const container = document.getElementById('chatContainer');
+            container.innerHTML += '<div class="loading" id="chatLoading" style="display:block;"><span class="spinner"></span> AI thinking...</div>';
+            container.scrollTop = container.scrollHeight;
+            
+            try {
+                const res = await fetch(`${API_URL}/api/yelp/reviews/${currentReviewId}/chat`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        message: chatHistory[chatHistory.length - 1].content,
+                        history: chatHistory.slice(0, -1),
+                        language: 'en'
+                    })
+                });
+                const data = await res.json();
+                
+                document.getElementById('chatLoading').remove();
+                
+                if (data.success) {
+                    chatHistory.push({role: 'assistant', content: data.assistant_message});
+                    addChatMessage('assistant', data.assistant_message);
+                } else {
+                    addChatMessage('assistant', '❌ Error: ' + (data.detail || data.assistant_message));
+                }
+            } catch (e) {
+                document.getElementById('chatLoading').remove();
+                addChatMessage('assistant', '❌ Network error: ' + e.message);
+            }
+        }
+        
+        function addChatMessage(role, content) {
+            const container = document.getElementById('chatContainer');
+            const existing = container.querySelector('.loading');
+            if (existing) existing.remove();
+            
+            container.innerHTML += `
+                <div class="chat-message ${role}">
+                    <div class="role">${role === 'user' ? 'You' : 'AI Assistant'}</div>
+                    ${content}
+                </div>
+            `;
+            container.scrollTop = container.scrollHeight;
+        }
+        
+        function updateChatDisplay() {
+            const container = document.getElementById('chatContainer');
+            if (chatHistory.length === 0) {
+                container.innerHTML = '<div style="text-align: center; color: #999; padding: 20px;">Start a conversation...</div>';
+            }
+        }
+        
+        // Utility
+        function showResult(id, message, type) {
+            const el = document.getElementById(id);
+            el.textContent = message;
+            el.className = `result ${type}`;
+            el.style.display = 'block';
+        }
+    </script>
+</body>
+</html>

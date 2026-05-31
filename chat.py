@@ -24,6 +24,7 @@ class StartSessionRequest(BaseModel):
     listing_id: str
     language: str
     listing_context: dict
+    previous_messages: list[dict] = []
 
 
 class MessageRequest(BaseModel):
@@ -57,13 +58,21 @@ def _build_system_prompt(listing_context: dict, language: str = "") -> str:
     return REVIEW_ANALYSIS_PROMPT + context_block
 
 
-def _call_groq(messages: list, temperature: float = 0.7, max_tokens: int = 1024) -> str:
-    response = _groq.chat.completions.create(
+def _call_groq(
+    messages: list,
+    temperature: float = 0.7,
+    max_tokens: int = 1024,
+    response_format: dict | None = None,
+) -> str:
+    kwargs: dict = dict(
         model=LLM_MODEL,
         messages=messages,
         temperature=temperature,
         max_tokens=max_tokens,
     )
+    if response_format is not None:
+        kwargs["response_format"] = response_format
+    response = _groq.chat.completions.create(**kwargs)
     return response.choices[0].message.content
 
 
@@ -88,13 +97,29 @@ async def start_session(
 
     system_prompt = _build_system_prompt(body.listing_context, body.language)
 
+    chat_history: list[dict] = [{"role": "system", "content": system_prompt}]
+    if body.previous_messages:
+        chat_history.extend(
+            {"role": m["role"], "content": m["content"]}
+            for m in body.previous_messages
+        )
+
+    print("=== CHAT START ===")
+    print(f"previous_messages count: {len(body.previous_messages)}")
+    print(f"transcript: {body.transcript[:200]}")
+    for i, msg in enumerate(chat_history):
+        print(f"  [{i}] {msg['role']}: {msg['content'][:100]}")
+    print("==================")
     try:
-        initial_response = _call_groq([
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": body.transcript},
-        ])
+        initial_response = _call_groq(
+            chat_history + [{"role": "user", "content": body.transcript}]
+        )
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Groq API error: {e}")
+
+    if body.previous_messages:
+        chat_history.append({"role": "user", "content": body.transcript})
+    chat_history.append({"role": "assistant", "content": initial_response})
 
     session_id = str(uuid.uuid4())
     session = {
@@ -104,10 +129,7 @@ async def start_session(
         "listing_id": body.listing_id,
         "detected_language": body.language,
         "listing_context": body.listing_context,
-        "chat_history": [
-            {"role": "system", "content": system_prompt},
-            {"role": "assistant", "content": initial_response},
-        ],
+        "chat_history": chat_history,
         "status": "active",
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -156,40 +178,100 @@ async def approve_session(
     _assert_session_owner(session, user_id)
 
     approval_prompt = (
-        'Based on the conversation history, return ONLY a valid JSON object '
-        '(no markdown, no explanation) with this exact structure:\n'
+        'IMPORTANT: Read the ENTIRE conversation above carefully. '
+        'The user described their ACTUAL experience including any '
+        'complaints, problems, or negative aspects. '
+        'You MUST reflect exactly what the user said — '
+        'do NOT make the review more positive than what was discussed. '
+        'If the user mentioned bad service, include bad service. '
+        'If the user mentioned good food, include good food. '
+        'Use the rating the user gave or inferred from the conversation. '
+        'Return ONLY a valid JSON object with no markdown, '
+        'no explanation, no code fences:\n'
         '{\n'
-        '  "improved_text": "The polished review text",\n'
-        '  "rating": 4,\n'
-        '  "sentiment": "Positive",\n'
-        '  "tone": "Enthusiastic",\n'
-        '  "key_points": ["Great service", "Good food", "Fair price"]\n'
+        '  "improved_text": "The honest review based on what user said",\n'
+        '  "rating": 3,\n'
+        '  "sentiment": "Negative",\n'
+        '  "tone": "Firm",\n'
+        '  "key_points": ["actual point 1", "actual point 2"]\n'
         '}\n'
-        'sentiment must be exactly one of: "Positive", "Negative", "Neutral"\n'
-        'rating must be an integer between 1 and 5.'
+        'sentiment must be exactly one of: Positive, Negative, Neutral\n'
+        'rating must be an integer between 1 and 5 matching the conversation.\n'
+        'Do NOT default to 5 stars or positive sentiment unless the user '
+        'explicitly said they had a great experience.'
     )
 
+    print("=== CHAT APPROVE ===")
+    for i, msg in enumerate(session['chat_history']):
+        print(f"  [{i}] {msg['role']}: {msg['content'][:100]}")
+    print("approval_prompt:", approval_prompt[:200])
+    print("====================")
+    print(f"[approve] session_id: {body.session_id}")
+    print(f"[approve] chat_history length: {len(session['chat_history'])}")
+    print(f"[approve] chat_history: {session['chat_history']}")
     try:
         raw = _call_groq(
             session["chat_history"] + [{"role": "user", "content": approval_prompt}],
-            temperature=0.2,
+            temperature=0.1,
             max_tokens=512,
+            response_format={"type": "json_object"},
         ).strip()
+        print(f"[approve] raw response: {raw[:500]}")
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Groq API error: {e}")
 
-    match = re.search(r'\{.*\}', raw, re.DOTALL)
-    if not match:
-        raise HTTPException(status_code=422, detail="AI did not return valid JSON")
     try:
-        result = json.loads(match.group())
+        result = json.loads(raw)
     except json.JSONDecodeError:
-        raise HTTPException(status_code=422, detail="Failed to parse AI response as JSON")
+        match = re.search(r'\{.*\}', raw, re.DOTALL)
+        if not match:
+            raise HTTPException(status_code=422, detail="AI did not return valid JSON")
+        try:
+            result = json.loads(match.group())
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=422, detail="Failed to parse AI response as JSON")
+
+    summary_prompt = (
+        'Summarize everything the user told you about '
+        'their experience at this business. '
+        'Be specific and include ALL details mentioned. '
+        'Structure it like this:\n'
+        '- Overall sentiment: [Positive/Negative/Neutral]\n'
+        '- Star rating: [1-5]\n'
+        '- What they liked: [list or "nothing mentioned"]\n'
+        '- What they disliked: [list or "nothing mentioned"]\n'
+        '- Specific details mentioned: [parking, service, '
+        'food quality, prices, atmosphere, staff names, '
+        'wait times, etc]\n'
+        '- Tone preference: [Firm/Polite/Neutral]\n'
+        '- Goal: [Awareness/Praise/etc]\n'
+        'Be factual. Only include what the user actually '
+        'said. Do not add anything they did not mention. '
+        'Return only the structured summary, nothing else.'
+    )
+
+    try:
+        summary = _call_groq(
+            session["chat_history"] + [
+                {"role": "user", "content": summary_prompt}
+            ],
+            temperature=0.1,
+            max_tokens=300,
+        ).strip()
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Groq API error (summary): {e}")
 
     session["status"] = "approved"
     save_session(body.session_id, session)
 
-    return result
+    return {
+        "improved_text": result["improved_text"],
+        "rating": result["rating"],
+        "sentiment": result["sentiment"],
+        "tone": result["tone"],
+        "key_points": result["key_points"],
+        "conversation_summary": summary,
+    }
 
 
 @router.post("/end")
