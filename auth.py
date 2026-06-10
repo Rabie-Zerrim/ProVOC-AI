@@ -48,7 +48,7 @@ class RelayTokenRequest(BaseModel):
 
 # ─── Token helper ─────────────────────────────────────────────────────────────
 
-def create_access_token(data: dict, expires_delta: timedelta = None, extra_claims: dict = None):
+def create_access_token(data: dict, expires_delta: timedelta = None, extra_claims: dict = None) -> str:
     to_encode = data.copy()
     if extra_claims:
         to_encode.update(extra_claims)
@@ -95,7 +95,7 @@ async def get_current_user(
 # ─── Routes ───────────────────────────────────────────────────────────────────
 
 @router.post("/register", status_code=status.HTTP_201_CREATED)
-async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)):
+async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)) -> dict:
     if db is None:
         raise HTTPException(status_code=503, detail="Database unavailable")
     if not _EMAIL_RE.match(body.email):
@@ -135,7 +135,7 @@ async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/login")
-async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
+async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)) -> dict:
     if db is None:
         raise HTTPException(status_code=503, detail="Database unavailable")
 
@@ -158,7 +158,7 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
 async def get_me(
     user_id: str = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-):
+) -> dict:
     result = await db.execute(select(User).where(User.id == uuid.UUID(user_id)))
     user = result.scalar_one_or_none()
     if user is None:
@@ -181,7 +181,7 @@ async def get_me(
 async def relay_token(
     body: RelayTokenRequest,
     x_bff_secret: str = Header(..., alias="X-BFF-Secret"),
-):
+) -> dict:
     if not BFF_SHARED_SECRET or x_bff_secret != BFF_SHARED_SECRET:
         raise HTTPException(status_code=403, detail="Invalid service secret")
 

@@ -1,11 +1,11 @@
-from fastapi import APIRouter, HTTPException
-from typing import List, Optional
+from fastapi import APIRouter
+from typing import List
 import uuid
 from datetime import datetime
 from database import get_milvus
-import os
+import groq as _groq_module
 from groq import Groq
-from config import GROQ_API_KEY
+from config import GROQ_API_KEY, LLM_MODEL
 from prompts import REVIEW_ANALYSIS_PROMPT, REVIEW_INTERACTION_PROMPT, FINAL_REPORT_PROMPT
 
 router = APIRouter(prefix="/api/yelp", tags=["yelp"])
@@ -25,8 +25,8 @@ STATIC_BUSINESSES = [
 # ─── ROUTES ───────────────────────────────────────────────────────────────────
 
 @router.get("/search")
-async def search_businesses(term: str = "", query: str = ""):
-    """Renvoie la liste statique filtrée"""
+async def search_businesses(term: str = "", query: str = "") -> list:
+    """Return the static business list, filtered by search term."""
     search_term = (term or query).lower()
     return [
         {
@@ -41,15 +41,15 @@ async def search_businesses(term: str = "", query: str = ""):
 
 
 @router.post("/reviews")
-async def create_review_session(businessData: dict):
-    """Crée une session de review (NO-DB: retourne un ID aléatoire)"""
+async def create_review_session(businessData: dict) -> dict:
+    """Create a review session (NO-DB: returns a random ID)."""
     review_id = str(uuid.uuid4())
     return {"_id": review_id, "id": review_id, "success": True}
 
 
 @router.put("/reviews/{review_id}/transcription")
-async def update_review_transcription(review_id: str, transcriptionData: dict):
-    """Met à jour la transcription (NO-DB: retourne succès simulé)"""
+async def update_review_transcription(review_id: str, transcriptionData: dict) -> dict:
+    """Update the transcription for a review (NO-DB: echoes back the data)."""
     return {
         "success": True,
         "_id": review_id,
@@ -58,31 +58,31 @@ async def update_review_transcription(review_id: str, transcriptionData: dict):
 
 
 @router.post("/reviews/{review_id}/chat")
-async def review_chat(review_id: str, chatData: dict):
+async def review_chat(review_id: str, chatData: dict) -> dict:
     """
-    Workflow complet avec Groq Llama 3:
-    1. Extraction entités / sentiment / rating
-    2. Validation avec l'utilisateur
-    3. Amélioration du texte
-    4. Rapport final
+    Full review workflow with Groq Llama:
+    1. Entity / sentiment / rating extraction
+    2. User validation
+    3. Text improvement
+    4. Final report
     """
     userMessage = chatData.get("message", "")
     history = chatData.get("history", [])  # list of {role, content}
 
-    # ── Choix du system prompt selon l'étape de la conversation
+    # Choose system prompt based on conversation stage
     is_initial = len(history) < 2
     if is_initial:
         system_prompt = REVIEW_ANALYSIS_PROMPT + "\n\n" + REVIEW_INTERACTION_PROMPT
     else:
         system_prompt = REVIEW_INTERACTION_PROMPT
 
-    # ── Détection si l'user demande un rapport final
+    # Switch to final report prompt when user requests a report
     if any(kw in userMessage.lower() for kw in ["rapport", "report", "final", "تقرير", "relatorio"]):
         system_prompt = FINAL_REPORT_PROMPT
 
     try:
         response = client_groq.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model=LLM_MODEL,
             messages=[
                 {"role": "system", "content": system_prompt},
                 *history,
@@ -92,21 +92,21 @@ async def review_chat(review_id: str, chatData: dict):
             max_tokens=1024
         )
         assistantMessage = response.choices[0].message.content
-        print(f"✅ Groq responded: {assistantMessage[:60]}...")
+        print(f"Groq responded: {assistantMessage[:60]}...")
         return {"success": True, "assistantMessage": assistantMessage, "usedFallback": False}
 
-    except Exception as e:
+    except _groq_module.APIError as e:
         error_msg = str(e)
-        print(f"❌ GROQ ERROR: {error_msg}")
+        print(f"Groq API error: {error_msg}")
         return {
             "success": True,
-            "assistantMessage": f"⚠️ Erreur IA: {error_msg[:120]}\n\nVérifiez votre GROQ_API_KEY dans .env",
+            "assistantMessage": f"AI Error: {error_msg[:120]}\n\nPlease check your GROQ_API_KEY in .env",
             "usedFallback": True,
             "fallbackReason": error_msg
         }
 
 
 @router.get("/pending-reviews")
-async def get_pending_reviews(userId: str = "test-user-id-001"):
-    """NO-DB MODE: Retourne une liste vide"""
+async def get_pending_reviews(userId: str = "test-user-id-001") -> list:
+    """NO-DB MODE: Returns an empty list."""
     return []

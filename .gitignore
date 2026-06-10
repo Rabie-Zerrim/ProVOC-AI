@@ -1,4 +1,4 @@
-# Environnement virtuel
+# Virtual environment
 venv/
 env/
 ENV/
@@ -8,12 +8,12 @@ __pycache__/
 *.py[cod]
 *$py.class
 
-# Base de données locales
+# Local databases
 *.db
 *.sqlite3
 *.db.lock
 
-# Configuration sensible
+# Secrets — never commit the real .env
 .env
 
 # Logs
@@ -23,3 +23,6 @@ server.out
 
 # ML models
 whisper-provoc-small/
+
+# IDE
+.vscode/

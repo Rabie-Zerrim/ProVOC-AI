@@ -30,13 +30,13 @@ else:
     print(f"Using baseline Whisper {WHISPER_MODEL}")
 
 
-def _write_file(path: str, content: bytes):
+def _write_file(path: str, content: bytes) -> None:
     with open(path, "wb") as f:
         f.write(content)
 
 
 @router.get("/health-check/transcribe")
-async def health_check():
+async def health_check() -> dict:
     if USE_FINETUNED and ft_model is not None:
         model_label = "fine-tuned whisper-provoc-v1"
         finetuned_active = True
@@ -58,7 +58,7 @@ async def transcribe_audio(
     audio: UploadFile = File(...),
     language: str = Form("auto"),
     task: str = Form("transcribe"),
-):
+) -> dict:
     if language != "auto" and language not in ACCEPTED_LANGUAGES:
         raise HTTPException(
             status_code=400,
