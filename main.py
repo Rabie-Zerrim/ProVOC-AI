@@ -8,6 +8,7 @@ load_dotenv()
 
 import config
 from database import get_milvus
+from langfuse_client import get_langfuse_client
 from auth import router as auth_router
 from yelp import router as yelp_router
 from lists import router as lists_router
@@ -130,11 +131,14 @@ async def health() -> dict:
     redis_status = redis_result if isinstance(redis_result, str) else f"error: {redis_result}"
     whisper_status = "loaded" if whisper_model is not None else "not loaded"
 
+    langfuse_status = "connected" if get_langfuse_client() else "disabled"
+
     return {
         "status": "ok",
         "db": db_status,
         "redis": redis_status,
         "whisper": whisper_status,
+        "langfuse": langfuse_status,
         "mode": "NO_DB_MODE" if config.NO_DB_MODE else "live",
     }
 

@@ -33,3 +33,8 @@ NO_DB_MODE = os.getenv("NO_DB_MODE", "true").lower() == "true"
 BFF_SHARED_SECRET = os.getenv("BFF_SHARED_SECRET")
 
 ALLOWED_AUDIO_EXTENSIONS = [".wav", ".mp3", ".webm", ".ogg", ".m4a", ".mp4", ".flac"]
+
+# Langfuse prompt management
+LANGFUSE_SECRET_KEY = os.getenv("LANGFUSE_SECRET_KEY")
+LANGFUSE_PUBLIC_KEY = os.getenv("LANGFUSE_PUBLIC_KEY")
+LANGFUSE_HOST = os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com")
