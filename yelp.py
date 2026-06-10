@@ -1,12 +1,18 @@
-from fastapi import APIRouter
-from typing import List
+import json
+import logging
 import uuid
 from datetime import datetime
-from database import get_milvus
-import groq as _groq_module
+from typing import List
+
+import redis as _redis_lib
+from fastapi import APIRouter
 from groq import Groq
+import groq as _groq_module
+
 from config import GROQ_API_KEY, LLM_MODEL
+from database import get_milvus
 from prompts import REVIEW_ANALYSIS_PROMPT, REVIEW_INTERACTION_PROMPT, FINAL_REPORT_PROMPT
+from redis_client import _client as _redis_client
 
 router = APIRouter(prefix="/api/yelp", tags=["yelp"])
 milvus_client = get_milvus()
@@ -108,5 +114,33 @@ async def review_chat(review_id: str, chatData: dict) -> dict:
 
 @router.get("/pending-reviews")
 async def get_pending_reviews(userId: str = "test-user-id-001") -> list:
-    """NO-DB MODE: Returns an empty list."""
-    return []
+    """Return sessions with status 'pending' for the given user from Redis."""
+    pending: list = []
+    try:
+        for key in _redis_client.scan_iter("session:*"):
+            raw = _redis_client.get(key)
+            if not raw:
+                continue
+            try:
+                session = json.loads(raw)
+            except (json.JSONDecodeError, ValueError):
+                continue
+            if session.get("status") != "pending":
+                continue
+            if session.get("user_id") != userId:
+                continue
+            transcript = ""
+            for msg in session.get("chat_history", []):
+                if msg.get("role") == "user":
+                    transcript = msg.get("content", "")
+                    break
+            pending.append({
+                "review_id": session.get("review_id", ""),
+                "session_id": session.get("session_id", ""),
+                "transcript": transcript,
+                "created_at": session.get("created_at", ""),
+            })
+    except _redis_lib.exceptions.ConnectionError:
+        logging.warning("pending-reviews: Redis unavailable, returning empty list")
+        return []
+    return pending
