@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 import uuid
 from database import get_milvus
-from auth import oauth2_scheme  # TODO: wire auth dependency
+from endpoints.v1.auth import oauth2_scheme  # TODO: wire auth dependency
 
 router = APIRouter(prefix="/api/lists", tags=["lists"])
 client = get_milvus()
