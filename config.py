@@ -24,9 +24,12 @@ WHISPER_MODEL = os.getenv("WHISPER_MODEL", "tiny")
 LLM_MODEL = os.getenv("LLM_MODEL", "llama-3.3-70b-versatile")
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
+REDIS_PASSWORD = os.getenv("REDIS_PASSWORD") or None
 
 # Database configuration
 DATABASE_URL = os.getenv("DATABASE_URL")
 DATABASE_URL_SYNC = os.getenv("DATABASE_URL_SYNC")
 NO_DB_MODE = os.getenv("NO_DB_MODE", "true").lower() == "true"
 BFF_SHARED_SECRET = os.getenv("BFF_SHARED_SECRET")
+
+ALLOWED_AUDIO_EXTENSIONS = [".wav", ".mp3", ".webm", ".ogg", ".m4a", ".mp4", ".flac"]

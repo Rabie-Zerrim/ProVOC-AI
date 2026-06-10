@@ -1,11 +1,15 @@
 import os
 import uuid
 import asyncio
+from pathlib import Path
+
 import whisper
 import torch
 from fastapi import APIRouter, UploadFile, File, HTTPException, Form
 
 from config import ACCEPTED_LANGUAGES, WHISPER_MODEL
+from audio.processor import AudioProcessor, UnsupportedFormatError
+from audio.emotion import EmotionRecognizer
 
 router = APIRouter(prefix="/api", tags=["transcription"])
 
@@ -64,15 +68,31 @@ async def transcribe_audio(
             status_code=400,
             detail=f"Language must be 'auto' or one of: {', '.join(ACCEPTED_LANGUAGES)}",
         )
-    temp_filename = f"temp_{uuid.uuid4()}.webm"
+
+    processor = AudioProcessor()
+
+    # Validate format before touching the file system
+    filename = audio.filename or "upload.webm"
+    try:
+        processor.validate_audio_type(filename, audio.content_type or "")
+    except UnsupportedFormatError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    ext = Path(filename).suffix or ".webm"
+    temp_filename = f"temp_{uuid.uuid4()}{ext}"
+    processed_path: str | None = None
+
     try:
         content = await audio.read()
         await asyncio.to_thread(_write_file, temp_filename, content)
 
+        # Convert to 16 kHz mono WAV and strip leading silence
+        processed_path = await asyncio.to_thread(processor.process, temp_filename)
+
         if USE_FINETUNED and ft_model is not None:
             import librosa
             import numpy as np
-            audio_array, _ = librosa.load(temp_filename, sr=16000)
+            audio_array, _ = librosa.load(processed_path, sr=16000)
             inputs = ft_processor(
                 audio_array, sampling_rate=16000, return_tensors="pt"
             ).input_features.to(device)
@@ -85,7 +105,6 @@ async def transcribe_audio(
             transcription = ft_processor.batch_decode(
                 output.sequences, skip_special_tokens=True
             )[0].strip()
-            # compute_transition_scores handles the forced-prefix offset correctly
             transition_scores = ft_model.compute_transition_scores(
                 output.sequences, output.scores, normalize_logits=True
             )
@@ -99,7 +118,7 @@ async def transcribe_audio(
                 options["language"] = language
             options["task"] = task
             print(f"Whisper processing: lang={language}, task={task}")
-            result = whisper_model.transcribe(temp_filename, **options)
+            result = whisper_model.transcribe(processed_path, **options)
             transcription = result["text"].strip()
             detected_language = result.get("language", "unknown")
             import numpy as np
@@ -109,17 +128,32 @@ async def transcribe_audio(
         if detected_language not in ACCEPTED_LANGUAGES:
             return {
                 "success": False,
-                "error": f"Detected language '{detected_language}' is not supported. Please speak in English, French, or Spanish.",
+                "error": (
+                    f"Detected language '{detected_language}' is not supported. "
+                    "Please speak in English, French, or Spanish."
+                ),
             }
+
+        # Emotion detection — falls back to neutral if model unavailable
+        emotion_recognizer = EmotionRecognizer.get_instance()
+        emotion_result = await asyncio.to_thread(
+            emotion_recognizer.predict, processed_path
+        )
+
         return {
             "success": True,
             "transcription": transcription,
             "language": detected_language,
             "confidence": confidence,
+            "emotion": emotion_result,
         }
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"Whisper Error: {e}")
         return {"success": False, "error": str(e)}
     finally:
         if os.path.exists(temp_filename):
             os.remove(temp_filename)
+        if processed_path and os.path.exists(processed_path):
+            os.remove(processed_path)

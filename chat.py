@@ -5,15 +5,14 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from groq import Groq
 
 from auth import get_current_user
-from config import GROQ_API_KEY, ACCEPTED_LANGUAGES, LLM_MODEL
+from config import ACCEPTED_LANGUAGES
+from llm.agent import LLMAgent
 from prompts import REVIEW_ANALYSIS_PROMPT
 from redis_client import get_session, save_session, delete_session
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
-_groq = Groq(api_key=GROQ_API_KEY)
 
 
 # ─── Request models ───────────────────────────────────────────────────────────
@@ -55,6 +54,8 @@ def _build_system_prompt(listing_context: dict, language: str = "") -> str:
         f"- Network Preferences: {network_prefs}\n"
         f"\nUSER LANGUAGE: {lang_name} — ALL your responses must be in {lang_name}.\n"
     )
+    if listing_context.get('context_note'):
+        context_block += f"\nUSER CONTEXT: {listing_context['context_note']}"
     return REVIEW_ANALYSIS_PROMPT + context_block
 
 
@@ -64,16 +65,13 @@ def _call_groq(
     max_tokens: int = 1024,
     response_format: dict | None = None,
 ) -> str:
-    kwargs: dict = dict(
-        model=LLM_MODEL,
-        messages=messages,
+    agent = LLMAgent.get_instance()
+    return agent.complete(
+        messages,
+        response_format=response_format,
         temperature=temperature,
         max_tokens=max_tokens,
     )
-    if response_format is not None:
-        kwargs["response_format"] = response_format
-    response = _groq.chat.completions.create(**kwargs)
-    return response.choices[0].message.content
 
 
 def _assert_session_owner(session: dict, user_id: str) -> None:
