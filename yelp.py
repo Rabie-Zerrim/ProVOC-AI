@@ -5,14 +5,14 @@ from datetime import datetime
 from typing import List
 
 import redis as _redis_lib
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from groq import Groq
 import groq as _groq_module
 
 from config import GROQ_API_KEY, LLM_MODEL
 from database import get_milvus
 from prompts import REVIEW_ANALYSIS_PROMPT, REVIEW_INTERACTION_PROMPT, FINAL_REPORT_PROMPT
-from redis_client import _client as _redis_client
+from redis_client import _client as _redis_client, save_session
 
 router = APIRouter(prefix="/api/yelp", tags=["yelp"])
 milvus_client = get_milvus()
@@ -55,12 +55,33 @@ async def create_review_session(businessData: dict) -> dict:
 
 @router.put("/reviews/{review_id}/transcription")
 async def update_review_transcription(review_id: str, transcriptionData: dict) -> dict:
-    """Update the transcription for a review (NO-DB: echoes back the data)."""
-    return {
-        "success": True,
-        "_id": review_id,
-        "voiceTranscription": transcriptionData.get("voiceTranscription", "")
-    }
+    """Find the Redis session for this review_id and persist the transcription data."""
+    found_session = None
+    try:
+        for key in _redis_client.scan_iter("session:*"):
+            raw = _redis_client.get(key)
+            if not raw:
+                continue
+            try:
+                data = json.loads(raw)
+            except (json.JSONDecodeError, ValueError):
+                continue
+            if data.get("review_id") == review_id:
+                found_session = data
+                break
+    except _redis_lib.exceptions.ConnectionError:
+        raise HTTPException(status_code=503, detail="Redis unavailable — please check your Redis connection")
+
+    if found_session is None:
+        raise HTTPException(status_code=404, detail=f"No active session found for review_id '{review_id}'")
+
+    found_session["voiceTranscription"] = transcriptionData.get("voiceTranscription", "")
+    if transcriptionData.get("language"):
+        found_session["detected_language"] = transcriptionData["language"]
+
+    save_session(found_session["session_id"], found_session)
+
+    return {"status": "updated", "review_id": review_id}
 
 
 @router.post("/reviews/{review_id}/chat")
