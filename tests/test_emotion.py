@@ -25,7 +25,9 @@ def test_predict_returns_dict() -> None:
         {"label": "sad", "score": 0.05},
         {"label": "angry", "score": 0.08},
     ])
-    recognizer._model = mock_pipeline
+    recognizer.model = mock_pipeline
+    recognizer._initialized = True
+    recognizer._failed = False
 
     result = recognizer.predict("fake_audio.wav")
 
