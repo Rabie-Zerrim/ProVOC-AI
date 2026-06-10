@@ -9,13 +9,13 @@ load_dotenv()
 import config
 from database import get_milvus
 from langfuse_client import get_langfuse_client
-from auth import router as auth_router
-from yelp import router as yelp_router
+from endpoints.v1.auth import router as auth_router
+from endpoints.v1.yelp import router as yelp_router
 from lists import router as lists_router
 from memos import router as memos_router
 from tasks import router as tasks_router
-from chat import router as chat_router
-from transcription import router as transcription_router
+from endpoints.v1.chat import router as chat_router
+from endpoints.v1.transcription import router as transcription_router
 
 milvus_client = get_milvus()
 
@@ -51,7 +51,7 @@ async def health() -> dict:
     import asyncio
     import socket
     import threading
-    from transcription import whisper_model
+    from endpoints.v1.transcription import whisper_model
 
     def _redis_ping() -> str:
         # redis.Redis(socket_connect_timeout=N) does not reliably time out
