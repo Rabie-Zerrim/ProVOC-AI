@@ -19,8 +19,15 @@ class EmotionRecognizer:
     _instance: EmotionRecognizer | None = None
 
     def __init__(self) -> None:
-        self._model = None
+        self._initialized: bool = False
+        self.model = None
+        self.processor = None
         self._failed: bool = False
+        try:
+            self._load_model()
+            self._initialized = True
+        except Exception:
+            self._initialized = False
 
     @classmethod
     def get_instance(cls) -> EmotionRecognizer:
@@ -30,14 +37,16 @@ class EmotionRecognizer:
 
     def _load_model(self) -> None:
         """Load the emotion classification pipeline on first use."""
-        if self._model is not None or self._failed:
+        if self.model is not None or self._failed:
             return
         try:
             from transformers import pipeline  # type: ignore
-            self._model = pipeline(
+            self.model = pipeline(
                 "audio-classification",
                 model="ehcalabres/wav2vec2-lg-xlsr-en-speech-emotion-recognition",
+                framework="pt",
             )
+            self._initialized = True
         except Exception as exc:
             self._failed = True
             raise EmotionModelError(f"Failed to load emotion model: {exc}") from exc
@@ -57,7 +66,7 @@ class EmotionRecognizer:
             return {"emotion": "neutral", "confidence": 0.0, "all_scores": {}}
 
         try:
-            results: list[dict] = self._model(audio_path, top_k=None)
+            results: list[dict] = self.model(audio_path, top_k=None)
             all_scores = {r["label"]: round(float(r["score"]), 4) for r in results}
             top = max(results, key=lambda x: x["score"])
             return {
