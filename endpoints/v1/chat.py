@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from auth import get_current_user
+from .auth import get_current_user
 from config import ACCEPTED_LANGUAGES
 from llm.agent import LLMAgent
 from prompts import REVIEW_ANALYSIS_PROMPT
