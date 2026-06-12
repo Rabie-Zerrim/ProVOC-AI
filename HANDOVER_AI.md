@@ -1054,3 +1054,300 @@ system_prompt = REVIEW_ANALYSIS_PROMPT.replace(
 )
 return system_prompt + context_block
 ```
+
+---
+
+## 18. MILVUS STANDALONE — DOCKER SETUP (added 2026-06-12)
+
+### What changed
+
+Milvus vector database is now running as a real service instead of the in-process `MockMilvusClient`. It is the backing store for the recommendation engine (see Section 19).
+
+### Infrastructure
+
+**File:** `milvus-docker-compose.yml`
+
+Three Docker services are brought up together:
+
+| Container | Image | Role |
+|---|---|---|
+| `milvus-etcd` | `quay.io/coreos/etcd:v3.5.5` | Distributed coordination / metadata |
+| `milvus-minio` | `minio/minio:RELEASE.2023-03-20T20-16-18Z` | Object storage for segments |
+| `milvus-standalone` | `milvusdb/milvus:v2.3.4` | Vector DB engine |
+
+**Ports exposed by `milvus-standalone`:**
+
+| Port | Protocol | Purpose |
+|---|---|---|
+| `19530` | gRPC | pymilvus client connection |
+| `9091` | HTTP | Health check endpoint |
+
+**MinIO ports:** `9000` (S3 API), `9001` (web console)
+
+Data volumes persist under `./volumes/etcd`, `./volumes/minio`, `./volumes/milvus` relative to the project directory.
+
+### Starting and stopping Milvus
+
+```bash
+# Start (detached)
+docker compose -f milvus-docker-compose.yml up -d
+
+# Verify all three containers are healthy
+docker compose -f milvus-docker-compose.yml ps
+
+# Health check (wait ~90 s for milvus-standalone to pass)
+curl http://localhost:9091/healthz
+# Expected: {"status":"ok"}  or  OK
+
+# Stop (preserves volumes)
+docker compose -f milvus-docker-compose.yml down
+
+# Stop and wipe all data (destructive)
+docker compose -f milvus-docker-compose.yml down --volumes
+```
+
+### New Python dependencies
+
+Added to `requirements.txt`:
+
+```
+pymilvus==2.3.4
+sentence-transformers>=2.2.0
+```
+
+### pymilvus 2.3.4 API note
+
+`MilvusClient` in pymilvus 2.3.4 does **not** have a `has_collection()` method (it was removed). Use `list_collections()` instead:
+
+```python
+# Wrong — AttributeError in 2.3.4
+if not self._client.has_collection(COLLECTION_NAME):
+
+# Correct
+if COLLECTION_NAME not in self._client.list_collections():
+```
+
+This fix is already applied in `taste_engine.py:38`.
+
+---
+
+## 19. `taste_engine.py` — TASTE VECTOR ENGINE (added 2026-06-12)
+
+### Overview
+
+**File:** `taste_engine.py`
+
+`TasteEngine` is a lazy-initialised singleton that stores per-user taste vectors in Milvus and uses collaborative filtering to recommend businesses.
+
+### Class structure
+
+```
+TasteEngine
+├── get_instance()         — singleton accessor
+├── _init()                — lazy connect to Milvus + load encoder
+├── _ensure_collection()   — creates "taste_vectors" if absent
+├── store_review()         — embed + insert review into Milvus
+└── get_recommendations()  — collaborative filtering query
+```
+
+### Embedding model
+
+- **Model:** `all-MiniLM-L6-v2` (via `sentence-transformers`)
+- **Dimension:** 384
+- **Loaded:** lazily on first call to `_init()`, not at import time
+- **Input to encoder:** `"{business_name} {business_type} {review_text}"` concatenated
+
+### Milvus collection: `taste_vectors`
+
+| Field | Type | Notes |
+|---|---|---|
+| `vector` | float[384] | Embedding of review text, COSINE metric |
+| `user_id` | varchar | UUID string of the reviewer |
+| `business_id` | varchar | Listing ID from the review session |
+| `business_name` | varchar | Business name from listing context |
+| `rating` | float | AI-extracted rating (1–5) |
+| `review_text` | varchar | First 200 chars of the improved review text |
+
+Collection is created automatically with `auto_id=True` on first `store_review` call if it does not exist.
+
+### `store_review()` — taste_engine.py:47
+
+Encodes `"{business_name} {business_type} {review_text}"` and inserts the resulting vector plus metadata into `taste_vectors`. Returns `True` on success, `False` on any failure (including Milvus unavailable).
+
+### `get_recommendations()` — taste_engine.py:78
+
+Collaborative filtering in six steps:
+
+1. Query the current user's 20 most recent reviews from Milvus → collect their vectors and `reviewed_ids`
+2. Average the vectors → `taste_vector` (mean of user's embedding history)
+3. Query up to 100 rows where `user_id != current_user` (other users' reviews)
+4. Deduplicate by `business_id`, discard any already in `reviewed_ids`
+5. Score each candidate by cosine similarity to `taste_vector`
+6. Sort descending, return top `limit` results as `list[dict]`
+
+Returns `[]` gracefully at any step if Milvus is unavailable or the user has no prior reviews.
+
+### Graceful degradation
+
+`_init()` is wrapped in `try/except`. If Milvus is not running, `_initialized` stays `False` and both public methods return `False`/`[]` without raising. The server starts and operates normally without Milvus; the recommendation feature simply returns empty results.
+
+---
+
+## 20. `GET /api/recommendations` ENDPOINT (added 2026-06-12)
+
+### Files changed
+
+- **New file:** `recommendations.py` — router definition
+- **`main.py`** — router registered at startup
+
+### Route
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/api/recommendations` | Bearer JWT | Returns personalised business recommendations for the authenticated user |
+
+### Request
+
+No body. Optional query parameter:
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `limit` | int | 5 | Maximum number of recommendations to return |
+
+### Response
+
+```json
+[
+  {
+    "business_name": "Bella Italia Tunis",
+    "business_id": "ChIJbella1",
+    "score": 0.649,
+    "rating": 3.0
+  }
+]
+```
+
+Returns `[]` (HTTP 200) when:
+- Milvus is unavailable (`_initialized = False`)
+- The user has no prior reviews stored in Milvus
+- No other-user reviews exist to compare against
+
+### Auth
+
+Uses `Depends(get_current_user)` — requires a valid Bearer JWT. Returns 401 if the token is absent or invalid. The `user_id` extracted from the JWT is passed directly to `TasteEngine.get_recommendations()`.
+
+---
+
+## 21. TASTE VECTOR PERSISTENCE IN `/api/chat/approve` (added 2026-06-12)
+
+### What changed
+
+`POST /api/chat/approve` now silently stores a taste vector in Milvus after the session is marked approved. This means every successful approve call automatically feeds the recommendation engine.
+
+### Files changed
+
+**`chat.py`** — one `try/except` block added after `save_session()`, before `return`. No other file touched.
+
+**Addition — `approve_session` handler (`chat.py:267-278`):**
+
+```python
+try:
+    from taste_engine import TasteEngine
+    TasteEngine.get_instance().store_review(
+        user_id=session.get("user_id", "unknown"),
+        business_id=session.get("listing_id", ""),
+        business_name=session.get("listing_context", {}).get("business_name", ""),
+        review_text=result.get("improved_text", ""),
+        rating=float(result.get("rating", 3)),
+        business_type=session.get("listing_context", {}).get("business_type", ""),
+    )
+except Exception:
+    pass  # taste engine is optional; never fail the approve response
+```
+
+### Behaviour
+
+- If Milvus is running: the approved review's embedding is stored and becomes available to the recommendation engine immediately.
+- If Milvus is down: the `except` silently swallows the error. The approve response (improved text, rating, sentiment, etc.) is returned normally — the caller never sees a 500 or 502.
+- The `TasteEngine` import is deferred inside the `try` block so a broken `taste_engine.py` import also cannot crash the approve endpoint.
+
+### What did NOT change
+
+- The approve response payload — untouched.
+- Redis session structure — untouched.
+- All other endpoints — untouched.
+
+---
+
+## 22. KNOWN FRAGILITY #10 — `context_note` RATING MISMATCH (added 2026-06-12)
+
+This is an addition to Section 11 (Known Fragility Points).
+
+### 10. `context_note` rating hint is not enforced (medium risk)
+
+When the caller sets `context_note` to a string like `"Rating: 5 stars"`, the AI sometimes ignores it and infers its own rating from the transcript text instead.
+
+**Observed in `final_test.py` (2026-06-12):** `context_note='Rating: 5 stars'` → AI returned `rating: 3` with improved text describing a "mediocre experience", despite the transcript saying "coffee was excellent and the staff were friendly".
+
+**Root cause:** `context_note` is appended as a single `USER CONTEXT:` line at the end of the system prompt (see Section 16). The AI treats it as advisory context, not as a hard constraint. When the transcript text carries a weaker sentiment signal than the stated rating, the model trusts its own inference.
+
+**Fix options:**
+1. Add an explicit instruction in the system prompt: *"If USER CONTEXT specifies a rating, use that exact rating — do not infer from text."*
+2. Post-process the approve response: if `context_note` contains a rating, override `result["rating"]` after the Groq call.
+3. Pass the pre-set rating as a separate field in the approve request body and enforce it server-side.
+
+Option 2 is the safest short-term fix — it requires no prompt changes and never risks breaking the AI's text quality.
+
+---
+
+## 23. `final_test.py` — END-TO-END VERIFICATION SCRIPT (added 2026-06-12)
+
+### What it is
+
+**File:** `final_test.py`
+
+An end-to-end smoke test that exercises the full stack in a single run: health check, BFF token relay, recommendations before and after a review, and the full chat approve flow.
+
+### Prerequisites
+
+- Server running on `http://127.0.0.1:5000`
+- Redis running
+- Milvus running (via `milvus-docker-compose.yml`)
+- PostgreSQL connected (for JWT auth via relay)
+- `BFF_SHARED_SECRET` set in `.env`
+
+### What it tests
+
+| Step | Check |
+|---|---|
+| 1 | `GET /health` — all subsystems green |
+| 2 | `POST /api/auth/token/relay` — BFF shared secret issues a relay JWT |
+| 3 | `GET /api/recommendations` — returns HTTP 200 (may be `[]` if no prior data) |
+| 4 | `POST /api/chat/start` — session created, Groq responds |
+| 5 | `POST /api/chat/approve` — structured review extracted, taste vector stored |
+| 6 | `GET /api/recommendations` again — result after the new review is stored |
+
+### Running it
+
+```bash
+# With server, Redis, Milvus, and DB all running:
+python final_test.py
+```
+
+### Verified output (2026-06-12)
+
+```
+=== FINAL VERIFICATION TEST ===
+1. Health: {'status': 'ok', 'db': 'connected', 'redis': 'connected', 'whisper': 'loaded', 'mode': 'live'}
+2. Token: OK
+3. Recommendations status: 200
+   Result: [{'business_name': 'Bella Italia Tunis', 'business_id': 'ChIJbella1', 'score': 0.649, 'rating': 3.0}]
+4. Chat start status: 200
+5. Chat approve status: 200
+   Review text: I visited Test Cafe and had a mediocre experience. The coffee was okay, but the
+   Rating: 3
+6. Recommendations after new review: [{'business_name': 'Bella Italia Tunis', 'business_id': 'ChIJbella1', 'score': 0.649, 'rating': 3.0}]
+=== TEST COMPLETE ===
+```
+
+Steps 3 and 6 return the same result because `Bella Italia Tunis` was already in Milvus from prior data and the newly stored `Test Cafe` review belongs to `user1` — after approve, `Test Cafe` is excluded from that user's own recommendations.
