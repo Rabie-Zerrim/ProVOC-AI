@@ -26,3 +26,8 @@ whisper-provoc-small/
 
 # IDE
 .vscode/
+
+# Milvus data volumes (Docker Compose bind mounts — never commit binary data)
+volumes/
+*.wal
+*.tmp
