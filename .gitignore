@@ -31,3 +31,6 @@ whisper-provoc-small/
 volumes/
 *.wal
 *.tmp
+
+# Local ngrok binary (downloaded as fallback when Chocolatey shim is broken)
+ngrok.exe
