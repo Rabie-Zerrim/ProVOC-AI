@@ -2,7 +2,7 @@
 from langfuse_client import get_prompt
 
 # 1. INITIAL ANALYSIS PROMPT
-REVIEW_ANALYSIS_PROMPT = """
+_REVIEW_ANALYSIS_PROMPT_FALLBACK = """
 You are Provoc, a friendly AI assistant that helps users write great reviews for businesses they've visited.
 
 Your role:
@@ -25,6 +25,11 @@ CRITICAL RULES:
 - ALWAYS respond in the same language as the user's message
 - Be concise, warm, and helpful
 """
+
+REVIEW_ANALYSIS_PROMPT = get_prompt(
+    "system-prompt",
+    _REVIEW_ANALYSIS_PROMPT_FALLBACK,
+)
 
 # 2. CHAT INTERACTION PROMPT
 _REVIEW_INTERACTION_PROMPT_FALLBACK = """

@@ -1,6 +1,10 @@
 from langfuse import Langfuse
 import config
-from prompts import _REVIEW_INTERACTION_PROMPT_FALLBACK, _FINAL_REPORT_PROMPT_FALLBACK
+from prompts import (
+    _REVIEW_ANALYSIS_PROMPT_FALLBACK,
+    _REVIEW_INTERACTION_PROMPT_FALLBACK,
+    _FINAL_REPORT_PROMPT_FALLBACK,
+)
 
 
 def register_all_prompts():
@@ -10,6 +14,7 @@ def register_all_prompts():
         host=config.LANGFUSE_HOST,
     )
     for name, content in [
+        ("system-prompt", _REVIEW_ANALYSIS_PROMPT_FALLBACK),
         ("review-interaction", _REVIEW_INTERACTION_PROMPT_FALLBACK),
         ("final-report", _FINAL_REPORT_PROMPT_FALLBACK),
     ]:
