@@ -136,7 +136,6 @@ class TasteEngine:
                     "business_name": b["business_name"],
                     "business_id": bid,
                     "score": round(sim, 3),
-                    "rating": b["rating"],
                 })
 
             # Step 6: Sort by similarity and return top N
