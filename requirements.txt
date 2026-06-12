@@ -26,3 +26,4 @@ transformers
 datasets
 jiwer
 mlflow
+langfuse>=2.0.0

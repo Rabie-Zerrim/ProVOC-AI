@@ -30,3 +30,8 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 DATABASE_URL_SYNC = os.getenv("DATABASE_URL_SYNC")
 NO_DB_MODE = os.getenv("NO_DB_MODE", "true").lower() == "true"
 BFF_SHARED_SECRET = os.getenv("BFF_SHARED_SECRET")
+
+# Langfuse prompt management
+LANGFUSE_SECRET_KEY = os.getenv("LANGFUSE_SECRET_KEY")
+LANGFUSE_PUBLIC_KEY = os.getenv("LANGFUSE_PUBLIC_KEY")
+LANGFUSE_HOST = os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com")

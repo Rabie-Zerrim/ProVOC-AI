@@ -1,4 +1,5 @@
 # Prompt Engineering for Provoc
+from langfuse_client import get_prompt
 
 # 1. INITIAL ANALYSIS PROMPT
 REVIEW_ANALYSIS_PROMPT = """
@@ -26,7 +27,7 @@ CRITICAL RULES:
 """
 
 # 2. CHAT INTERACTION PROMPT
-REVIEW_INTERACTION_PROMPT = """
+_REVIEW_INTERACTION_PROMPT_FALLBACK = """
 YOU ARE A YELP REVIEW WRITING ASSISTANT.
 CONTEXT: The user has just provided a transcribed voice feedback.
 YOUR STEPS:
@@ -43,8 +44,13 @@ GOLDEN RULE: ALWAYS RESPOND IN THE SAME LANGUAGE AS THE USER.
 BE CONCISE, WARM, AND PROFESSIONAL.
 """
 
+REVIEW_INTERACTION_PROMPT = get_prompt(
+    "review-interaction",
+    _REVIEW_INTERACTION_PROMPT_FALLBACK,
+)
+
 # 3. REPORT GENERATION PROMPT
-FINAL_REPORT_PROMPT = """
+_FINAL_REPORT_PROMPT_FALLBACK = """
 Generate a structured final report for the user's feedback.
 Include:
 - Business Name
@@ -53,3 +59,8 @@ Include:
 - Improved Text
 - Advice for the business (if negative) or congratulations (if positive).
 """
+
+FINAL_REPORT_PROMPT = get_prompt(
+    "final-report",
+    _FINAL_REPORT_PROMPT_FALLBACK,
+)
