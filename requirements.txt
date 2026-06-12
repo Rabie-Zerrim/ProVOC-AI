@@ -12,8 +12,8 @@ torchaudio
 python-dotenv==1.0.1
 ffmpeg-python==0.2.0
 numpy
-pymilvus
-milvus-lite
+pymilvus==2.3.4
+sentence-transformers>=2.2.0
 requests
 python-slugify
 groq

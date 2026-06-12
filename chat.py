@@ -264,6 +264,19 @@ async def approve_session(
     session["status"] = "approved"
     save_session(body.session_id, session)
 
+    try:
+        from taste_engine import TasteEngine
+        TasteEngine.get_instance().store_review(
+            user_id=session.get("user_id", "unknown"),
+            business_id=session.get("listing_id", ""),
+            business_name=session.get("listing_context", {}).get("business_name", ""),
+            review_text=result.get("improved_text", ""),
+            rating=float(result.get("rating", 3)),
+            business_type=session.get("listing_context", {}).get("business_type", ""),
+        )
+    except Exception:
+        pass  # taste engine is optional; never fail the approve response
+
     return {
         "improved_text": result["improved_text"],
         "rating": result["rating"],

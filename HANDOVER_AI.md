@@ -951,6 +951,90 @@ Every `/approve` call now makes **two** Groq API calls instead of one. Both use 
 
 ---
 
+## 16. `context_note` INJECTION INTO SYSTEM PROMPT (added 2026-05-31)
+
+### What changed
+
+`_build_system_prompt()` in `chat.py` now appends a `USER CONTEXT` line to the system prompt when `listing_context` contains a `context_note` key. This means tag selections and pre-set ratings from the Smart Review flow reach the AI from the very first message, not just from conversation history.
+
+### Files changed
+
+**`chat.py`** — two lines added, no other file touched.
+
+**Edit — `_build_system_prompt()` (lines 58–59), inserted before the `return`:**
+
+```python
+if listing_context.get('context_note'):
+    context_block += f"\nUSER CONTEXT: {listing_context['context_note']}"
+return REVIEW_ANALYSIS_PROMPT + context_block
+```
+
+### Exact lines changed
+
+| File | Lines | Change |
+|---|---|---|
+| `chat.py` | 58–59 (inserted) | Added `context_note` guard and append before the existing `return` |
+
+### Behaviour
+
+- If `context_note` is absent or empty string, behaviour is **identical to before** — no extra line appended.
+- If `context_note` is present, the system prompt gains a final line: `USER CONTEXT: <value>`.
+- The caller (Smart Review flow) sets `context_note` to a human-readable summary of the user's tag selections and rating, e.g. `"User selected: Bad service, Cold food. Rating: 2 stars."`.
+
+### What did NOT change
+
+- All other fields read from `listing_context` — untouched.
+- `_call_groq`, all endpoints, Redis structure — untouched.
+
+---
+
+## 17. `/health` ENDPOINT — REDIS TIMEOUT FIX (2026-06-01)
+
+### Problem
+
+`GET /health` was hanging for **22–25 seconds** before responding. Root cause was three layered issues, each masking the next:
+
+1. **redis-py `socket_connect_timeout` does not reliably time out on Windows.** When the Redis host is `"localhost"`, Python's `socket.getaddrinfo` resolves it to both `::1` (IPv6) and `127.0.0.1` (IPv4). redis-py tries IPv6 first; the Windows OS TCP timeout for an unreachable IPv6 loopback is ~20 s. The `socket_connect_timeout` parameter only fires after the OS returns from `connect()`, not before. Measured: `redis.Redis(socket_connect_timeout=2).ping()` → 16.74 s. Raw `socket.socket(); sock.settimeout(2); sock.connect()` → 2.00 s exactly.
+
+2. **`asyncio.wait_for()` does not preempt C-level socket operations on Python 3.11+.** In 3.11, `wait_for` was changed to wait for the inner task to acknowledge cancellation before raising `TimeoutError`. asyncpg's C-level connect does not respond to cancellation immediately, so `wait_for(asyncpg.connect(), timeout=2)` blocked for the full OS TCP timeout before raising.
+
+3. **SQLAlchemy's `create_async_engine` has no `connect_timeout` set**, so the DB check also had no deadline.
+
+### Fix applied
+
+**File: `main.py` — `GET /health` handler (lines 48–120)**
+
+| Check | Before | After |
+|---|---|---|
+| Redis | `redis.Redis(socket_connect_timeout=2).ping()` — 20 s+ | Raw `socket.socket(); settimeout(2); connect(); PING/PONG frame` — 2 s max |
+| DB | `async with engine.connect()` — no timeout (20+ s) | `asyncpg.connect()` in a daemon thread; `thread.join(timeout=2.5)` provides the hard cap |
+| Concurrency | Sequential — total = Redis_time + DB_time | `asyncio.gather(asyncio.to_thread(db_fn), asyncio.to_thread(redis_fn))` — both run concurrently, total = max(2.5, 2) |
+
+**File: `redis_client.py` — module-level Redis client (lines 1–21)**
+
+- Added `import socket`
+- Added `_redis_host = socket.gethostbyname(os.getenv("REDIS_HOST", "localhost"))` to force IPv4 resolution before the client is created
+- Added `socket_connect_timeout=2, socket_timeout=2` to the `redis.Redis(...)` constructor
+
+### Measured results
+
+| Call | Before | After |
+|---|---|---|
+| 1st after startup | 22–25 s | ~3.4 s (2 s Redis timeout + ~1.3 s first-request init) |
+| 2nd+ | 22–25 s | ~2.1 s (2 s Redis timeout; ~0.1 s otherwise if Redis is up) |
+
+When Redis is running, both the raw-socket PING and the asyncpg connect complete in <0.2 s, giving a total health response of <0.5 s.
+
+### Why the daemon-thread approach for DB
+
+`asyncio.to_thread` / `run_in_executor` submit to asyncio's thread pool, which works correctly. Inside the thread, creating a fresh `asyncio.new_event_loop()` and running `asyncpg.connect()` is necessary because asyncpg requires its own event loop context when called outside the main loop. The daemon thread is given a 2.5 s `join()` deadline; if asyncpg still hasn't connected by then, the function returns `"error: timeout"` and the daemon thread is silently abandoned (it will eventually complete or error on its own without blocking the server).
+
+### Known limitation
+
+`redis_client.py`'s production client (`_client`) still uses `redis.Redis` with `socket_connect_timeout=2, socket_timeout=2`. On Windows, these may not fire reliably (see above). In production on Railway (Linux), redis-py timeouts behave correctly. If session operations are slow on Windows during development, this is the cause — it does not affect Railway.
+
+---
+
 ## 13. POST-DEMO BACKLOG
 
 Small items to action after the demo, in no particular order.

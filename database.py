@@ -31,6 +31,11 @@ def get_milvus():
     return MockMilvusClient()
 
 
+def get_taste_engine():
+    from taste_engine import TasteEngine
+    return TasteEngine.get_instance()
+
+
 class MockMilvusClient:
     """Simulates Milvus for the frontend without any disk files or segments"""
     def __init__(self):
