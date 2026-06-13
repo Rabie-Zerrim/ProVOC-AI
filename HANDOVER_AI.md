@@ -1351,3 +1351,208 @@ python final_test.py
 ```
 
 Steps 3 and 6 return the same result because `Bella Italia Tunis` was already in Milvus from prior data and the newly stored `Test Cafe` review belongs to `user1` — after approve, `Test Cafe` is excluded from that user's own recommendations.
+
+---
+
+## 24. LANGFUSE PROMPT MANAGEMENT (added 2026-06-12)
+
+### What changed
+
+All three LLM prompts in `prompts.py` are now connected to Langfuse for live editing without code deploys. The connection uses a singleton Langfuse client with fallback to hardcoded strings.
+
+### New files
+
+| File | Purpose |
+|---|---|
+| `langfuse_client.py` | Singleton Langfuse client + `get_prompt()` helper with fallback |
+| `register_prompts.py` | One-time script to push all three prompts to Langfuse with `"production"` label |
+
+### Modified files
+
+| File | Change |
+|---|---|
+| `prompts.py` | Hardcoded strings renamed to `_*_FALLBACK`; wrapped with `get_prompt()` at module level |
+| `config.py` | Added `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_HOST` |
+| `main.py` | `/health` now reports `"langfuse": "connected"` or `"disabled"` |
+| `requirements.txt` | Added `langfuse>=2.0.0` (installed as 4.7.1 in venv) |
+| `.env.example` | Added Langfuse credential placeholders |
+
+### Registered prompt names in Langfuse
+
+| Langfuse name | Variable in `prompts.py` | Used by |
+|---|---|---|
+| `system-prompt` | `REVIEW_ANALYSIS_PROMPT` | `chat.py:12` — system message for every chat session |
+| `review-interaction` | `REVIEW_INTERACTION_PROMPT` | Currently dead code — defined for future use |
+| `final-report` | `FINAL_REPORT_PROMPT` | Currently dead code — defined for future use |
+
+All registered with label `"production"`.
+
+### How prompts are loaded
+
+Prompts are fetched from Langfuse at **import time** (when `prompts.py` is first imported). This means:
+
+- **Server must be restarted** to pick up edits made in the Langfuse dashboard.
+- If Langfuse is unavailable at startup (network error, wrong credentials), `get_prompt()` silently falls back to the hardcoded `_*_FALLBACK` string. The server starts normally.
+- `register_prompts.py` only needs to be run once per environment, or whenever a new prompt is added.
+
+### Re-registering prompts
+
+```bash
+# Run from the project root with venv activated:
+venv\Scripts\python.exe register_prompts.py
+```
+
+### New environment variables required in `.env`
+
+| Variable | Purpose | Example |
+|---|---|---|
+| `LANGFUSE_SECRET_KEY` | Langfuse API secret | `sk-lf-...` |
+| `LANGFUSE_PUBLIC_KEY` | Langfuse API public key | `pk-lf-...` |
+| `LANGFUSE_HOST` | Langfuse host (default: cloud) | `https://cloud.langfuse.com` |
+
+---
+
+## 25. `start_provoc.py` — PERMANENT NGROK FIX (added 2026-06-12)
+
+### What changed
+
+`start_provoc.py` was fully rewritten to replace cloudflared with ngrok. Cloudflared was returning Error 1033 ("tunnel not found") frequently on this machine. ngrok is now the permanent solution.
+
+### What was removed
+
+- All cloudflared `subprocess.Popen` calls
+- URL extraction regex (`re.search(r'https://[a-z0-9-]+\.trycloudflare\.com', ...)`)
+- All other cloudflared references
+
+### What was added
+
+1. `kill_port(5000)` and `kill_port(4040)` — kills any lingering uvicorn or ngrok processes before starting fresh. Uses `netstat -ano` + `taskkill /PID /F`.
+2. `subprocess.Popen([NGROK_BIN, "http", "5000"])` — starts ngrok tunnel.
+3. Retry loop (6 attempts × 2 s) to fetch the tunnel URL from `http://127.0.0.1:4040/api/tunnels`.
+4. `NGROK_BIN` resolution — prefers `ngrok.exe` in the project directory, falls back to `shutil.which("ngrok")`.
+
+### Chocolatey shim issue
+
+The system ngrok at `C:\ProgramData\chocolatey\bin\ngrok.exe` is a Chocolatey shim pointing to a missing binary at `C:\ProgramData\chocolatey\lib\ngrok\tools\ngrok.exe`. `choco upgrade ngrok` also fails with an access denied error (`C:\ProgramData\chocolatey\lib\ngrok\.chocolateyPending` lock).
+
+**Fix:** Standalone ngrok v3.39.7 was downloaded from the ngrok website directly into the project root as `ngrok.exe`. This file is gitignored (`.gitignore` entry: `ngrok.exe`). On a new machine, download from `https://ngrok.com/download` (ngrok v3, Windows 64-bit) and place `ngrok.exe` in the project root.
+
+### UnicodeEncodeError note
+
+On Windows terminals using `cp1252` encoding, `print("\n✅ ProVOC AI is ready!")` raises `UnicodeEncodeError: 'charmap' codec can't encode character '✅'`. The Railway URL update has already been sent by this point so the service is fully operational despite the console error. Fix: replace the emoji with `[OK]` in `start_provoc.py:126`, or run the terminal with `PYTHONIOENCODING=utf-8`.
+
+### ngrok authentication requirement
+
+ngrok v3 requires a one-time authentication: `ngrok config add-authtoken <token>`. The token is stored in `%APPDATA%\ngrok\ngrok.yml`. If ngrok is not authenticated, the tunnel API at `127.0.0.1:4040` returns an empty tunnels list and the script exits with `ERROR: Could not get tunnel URL`.
+
+---
+
+## 26. RECOMMENDATIONS DATA — RESEED (added 2026-06-12)
+
+### Background
+
+The initial Milvus seeding used placeholder `business_id` values (e.g., `"ChIJbella1"`) that do not match real Google Place IDs. This caused the recommendation engine to surface businesses that do not exist in the mobile app's business database.
+
+### What was done
+
+- **`fix_place_ids.py`** — one-shot script that replaces placeholder `business_id` values in the Milvus `taste_vectors` collection with real Google Place IDs by deleting and re-inserting the affected vectors.
+- **`seed_recommendations.py`** — full reseed script that clears `taste_vectors` and inserts 13 reviews across multiple simulated users, using real Google Place IDs from the production restaurant database.
+
+### Real account seeded
+
+User `b009eaa2-fd6c-4b3e-bcf0-731ce237cf39` (the demo test account) has **5 recommendations** available after the reseed.
+
+### How to reseed from scratch
+
+```bash
+# With Milvus running and venv activated:
+venv\Scripts\python.exe seed_recommendations.py
+```
+
+> **Warning:** `seed_recommendations.py` clears the entire `taste_vectors` collection before re-inserting. Do not run against a production instance that has real user review data.
+
+---
+
+## 27. KNOWN STARTUP ISSUE — VENV IS REQUIRED (added 2026-06-12)
+
+### Problem
+
+`start_provoc.py` launches uvicorn via `sys.executable`, so uvicorn inherits the Python interpreter that ran the script. If the script is launched with system Python (`C:\Users\Rabie\AppData\Local\Programs\Python\Python311\python.exe`), the server fails immediately at startup:
+
+```
+ModuleNotFoundError: No module named 'pymilvus'
+```
+
+`pymilvus`, `sentence-transformers`, `langfuse`, and several other dependencies are only installed in the project venv (`D:\pfe ai\pv-ai\venv\`), not in system Python.
+
+### Fix
+
+Always run `start_provoc.py` from the activated venv:
+
+```bash
+cd "D:\pfe ai\pv-ai"
+venv\Scripts\activate
+python start_provoc.py
+```
+
+Or pass the venv interpreter explicitly:
+
+```bash
+"D:\pfe ai\pv-ai\venv\Scripts\python.exe" "D:\pfe ai\pv-ai\start_provoc.py"
+```
+
+### Milvus Docker containers
+
+The three Milvus containers (`milvus-etcd`, `milvus-minio`, `milvus-standalone`) run independently via `milvus-docker-compose.yml` — they are not started by `start_provoc.py`. Start them separately before launching the server:
+
+```bash
+docker compose -f milvus-docker-compose.yml up -d
+```
+
+If Milvus is not running, `TasteEngine` gracefully degrades: `/api/recommendations` returns `[]` and `/api/chat/approve` silently skips the taste-vector write. The rest of the API is unaffected.
+
+---
+
+## 28. DEMO DAY — FULL STARTUP SEQUENCE (added 2026-06-12)
+
+### Prerequisites
+
+- Docker Desktop running
+- ngrok authenticated (`ngrok config add-authtoken <token>`)
+- `D:\pfe ai\pv-ai\ngrok.exe` present (standalone binary, not the broken Chocolatey shim)
+- `.env` contains `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY`, `DATABASE_URL`, `BFF_SHARED_SECRET`, `GROQ_API_KEY`
+
+### Startup commands
+
+```bash
+# Step 1 — Start Milvus (if not already running)
+docker compose -f milvus-docker-compose.yml up -d
+
+# Step 2 — Activate venv and start the server + tunnel
+cd "D:\pfe ai\pv-ai"
+venv\Scripts\activate
+python start_provoc.py
+```
+
+`start_provoc.py` will kill stale processes on ports 5000 and 4040, start uvicorn, start ngrok, update Railway `FASTAPI_URL`, print the tunnel URL, and hold until Ctrl+C.
+
+### Health check
+
+```bash
+curl http://127.0.0.1:5000/health
+```
+
+Expected when everything is healthy:
+
+```json
+{"status": "ok", "db": "connected", "redis": "connected", "whisper": "loaded", "langfuse": "connected", "mode": "live"}
+```
+
+### Quick diagnostics
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| `langfuse: "disabled"` in health | Missing Langfuse credentials in `.env` | Add `LANGFUSE_SECRET_KEY` and `LANGFUSE_PUBLIC_KEY` from the Langfuse dashboard |
+| `GET /api/recommendations` returns `[]` | Milvus not running or empty collection | Run `docker compose -f milvus-docker-compose.yml up -d`, then `python seed_recommendations.py` |
+| `ModuleNotFoundError: pymilvus` on start | Script run with system Python, not venv | Run `venv\Scripts\activate` first, then `python start_provoc.py` |
+| `ERROR: Could not get tunnel URL` | ngrok not authenticated or binary missing | Run `ngrok config add-authtoken <token>` or re-download `ngrok.exe` |
