@@ -1556,3 +1556,122 @@ Expected when everything is healthy:
 | `GET /api/recommendations` returns `[]` | Milvus not running or empty collection | Run `docker compose -f milvus-docker-compose.yml up -d`, then `python seed_recommendations.py` |
 | `ModuleNotFoundError: pymilvus` on start | Script run with system Python, not venv | Run `venv\Scripts\activate` first, then `python start_provoc.py` |
 | `ERROR: Could not get tunnel URL` | ngrok not authenticated or binary missing | Run `ngrok config add-authtoken <token>` or re-download `ngrok.exe` |
+
+---
+
+## 29. RAILWAY DEPLOYMENT (added 2026-06-17)
+
+### Why Railpack was abandoned for a Dockerfile
+
+Railway's default builder (Railpack) had persistent, unresolved 2026 platform-side bugs:
+
+- A literal `"/app/.venv": not found` cache checksum error recurring across multiple freshly-created services, even with cache-busting env vars set.
+- A separate `grpcio<=1.58.0` (pymilvus 2.3.4's pin) build failure due to missing `pkg_resources` in pip's isolated build environment on Python 3.12/3.13.
+
+Confirmed via GitHub issues search that both are known, currently open Railpack bugs — not configuration mistakes.
+
+**Fix:** Switched the service's Builder setting to **Dockerfile** (path: `Dockerfile` at repo root). This bypassed both issues in one move, since Docker handles its own build process independently of Railpack's broken caching.
+
+### `Dockerfile` (new file, repo root)
+
+| Step | Detail |
+|---|---|
+| Base image | `python:3.12-slim` |
+| System deps | `ffmpeg`, `build-essential` (via `apt`) |
+| Pip bootstrap | Upgrades `pip`, `setuptools`, `wheel` before installing requirements — a second layer of defense against the `pkg_resources`/build-isolation issue above |
+| Install source | `requirements-prod.txt` |
+| Start command | `uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}` |
+
+### `requirements-prod.txt` (new file)
+
+Trimmed copy of `requirements.txt` excluding training-only dependencies (`mlflow`, `datasets`, `jiwer`). Confirmed via grep that only `mlflow_config.py`, `whisper_finetune.py`, and `whisper_inference_test.py` import them — `main.py` and its full import chain have zero dependency on them.
+
+Also upgraded `pymilvus==2.3.4` to `pymilvus>=2.4.0` in this file specifically. Newer pymilvus relaxes the strict `grpcio<=1.58.0` pin that was the root cause of the build failures above.
+
+### Public deployment
+
+Live at `https://provoc-ai-production.up.railway.app`. Confirmed `/` and `/health` return 200.
+
+**Recommendations/Milvus are deliberately NOT exposed via this deployment.** `pymilvus` now installs successfully (fixed above), but the actual Milvus vector DB it connects to remains local-only (Docker on the dev machine) — Milvus itself was never containerized for Railway. This is an intentional architecture choice (self-hosted vector DB for cost and data-locality reasons), not a bug. **Recommendations only work when testing against the local stack, not the Railway URL.**
+
+### New dedicated Postgres database (`provoc_ai_db`)
+
+`NO_DB_MODE=true` was the initial approach to deploy pv-ai without a real database, but this breaks **all authenticated endpoints**, not just DB-heavy ones: `get_current_user()` in `auth.py` requires `db: AsyncSession` as a FastAPI dependency. When `NO_DB_MODE` is true, `get_db()` always yields `None`, causing `if db is None: raise HTTPException(503, "Database unavailable")` to fire on every authenticated request — including chat, which doesn't conceptually need a DB just to decode a JWT, but the dependency signature requires it regardless.
+
+**Fix:** Created a new, separate database (`provoc_ai_db`) on the **same** Postgres server instance pv-bff already uses on Railway, via that Postgres service's Console tab:
+
+```bash
+psql $DATABASE_URL -c "CREATE DATABASE provoc_ai_db;"
+```
+
+This is a separate database on a shared server (like separate drawers in one cabinet) — zero risk or interaction with pv-bff's existing data/schema, since pv-ai uses SQLAlchemy/Alembic and pv-bff uses Prisma with completely different table structures.
+
+Connection uses the Postgres service's **public proxy address** (not `RAILWAY_PRIVATE_DOMAIN`), since pv-ai and this Postgres instance live in different Railway projects and private networking only works within the same project.
+
+```
+DATABASE_URL / DATABASE_URL_SYNC =
+postgresql(+asyncpg)://postgres:<password>@<public-proxy-host>:<port>/provoc_ai_db
+```
+
+`NO_DB_MODE` is now `false` in production.
+
+Alembic migrations (`4a57415a185a_initial_schema`, `df705e498e8c_add_user_credentials`) were applied to this new database from a local machine by temporarily overriding `DATABASE_URL_SYNC`:
+
+```powershell
+$env:DATABASE_URL_SYNC="<railway-public-connection-string>"
+alembic upgrade head
+```
+
+### Langfuse prompt management — confirmed genuinely live
+
+Re-verified via direct code read (this was previously uncertain — see Section 24's note about restart-required-to-pick-up-edits).
+
+`prompts.py` line ~29:
+```python
+REVIEW_ANALYSIS_PROMPT = get_prompt("system-prompt", _REVIEW_ANALYSIS_PROMPT_FALLBACK)
+```
+
+`get_prompt()` in `langfuse_client.py` genuinely calls the real Langfuse SDK (`client.get_prompt(prompt_name)` then `.compile()`), only falling back to the hardcoded local string if that call raises any exception. Confirmed this is real, not just "credentials valid" — the chat module's prompt is dynamically pulled from Langfuse's dashboard at process-start time (consistent with Section 24's existing note that prompts load at import time and require a restart to pick up dashboard edits).
+
+### Recurring env var paste mistake (note for future deployments)
+
+Multiple times during this deployment, pasting a variable's intended value into Railway's UI accidentally included the variable name itself as a literal prefix in the value field (e.g. `FASTAPI_URL`'s value became the literal string `"FASTAPI_URL=https://..."` instead of just `"https://..."`), causing axios/httpx to throw an `Invalid URL` error at runtime that doesn't surface until the affected code path is actually hit.
+
+**Always double-check pasted values via Railway's Raw Editor** (plain-text view of all vars) after pasting, especially after copying a value that was itself formatted as `KEY=VALUE` somewhere else (terminal output, a `.env` file, a chat message).
+
+### Final Railway environment variables (production)
+
+| Variable | Notes |
+|---|---|
+| `ALLOWED_ORIGINS` | CORS origin list |
+| `BFF_SHARED_SECRET` | Shared secret for `/api/auth/token/relay` |
+| `DATABASE_URL` | Async connection string → `provoc_ai_db` |
+| `DATABASE_URL_SYNC` | Sync connection string (Alembic) → `provoc_ai_db` |
+| `FINETUNED_WHISPER_PATH` | Path to fine-tuned Whisper model |
+| `GROQ_API_KEY` | Groq inference key |
+| `JWT_SECRET` | JWT signing secret |
+| `LANGFUSE_HOST` | Langfuse host |
+| `LANGFUSE_PUBLIC_KEY` | Langfuse public key |
+| `LANGFUSE_SECRET_KEY` | Langfuse secret key |
+| `LLM_MODEL` | Groq model identifier |
+| `MLFLOW_TRACKING_URI` | MLflow server URI (training-only, not used at runtime) |
+| `NO_CACHE` | Cache-busting flag (vestigial from Railpack troubleshooting) |
+| `NO_DB_MODE` | Now `false` in production |
+| `OPENAI_API_KEY` | Declared, unused by active code |
+| `RAILPACK_INSTALL_CMD` | Vestigial — harmless to leave set since Dockerfile builder is now used |
+| `RAILPACK_PYTHON_VERSION` | Vestigial — same as above |
+| `REDIS_HOST` | Redis hostname |
+| `REDIS_PASSWORD` | Redis auth password |
+| `REDIS_PORT` | Redis port |
+| `REDIS_URL` | Full Redis connection URL |
+| `USE_FINETUNED_WHISPER` | `true` in production |
+| `WHISPER_MODEL` | Base Whisper model size fallback |
+| `YELP_API_KEY` | Declared, unused by active code |
+
+> Real values live in Railway's dashboard — not duplicated here for security. This table exists so a future reader knows exactly which variable **names** must be configured.
+
+### Known unverified item — fine-tuned Whisper loading
+
+Deploy logs at one point showed `"Using baseline Whisper tiny"` rather than the fine-tuned model, despite `USE_FINETUNED_WHISPER=true`. This was **before** the final env var corrections in this session.
+
+**Flag for re-verification on the next deploy:** check deploy logs for the Whisper loading message and confirm it indicates the fine-tuned model (`whisper-provoc-small/final`) is actually loading, not silently falling back to baseline `tiny`.
