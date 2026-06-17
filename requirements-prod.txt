@@ -24,3 +24,5 @@ redis
 openai-whisper
 transformers
 langfuse>=2.0.0
+
+librosa
