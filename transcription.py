@@ -81,6 +81,7 @@ async def transcribe_audio(
                     inputs,
                     return_dict_in_generate=True,
                     output_scores=True,
+                    max_new_tokens=128,
                 )
             transcription = ft_processor.batch_decode(
                 output.sequences, skip_special_tokens=True
