@@ -9,7 +9,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 # Upgrade pip tooling first to avoid pkg_resources/build-isolation issues
 RUN pip install --upgrade pip setuptools wheel
-# Install Python dependencies (prod-only, no training/eval libs)
+# Install CPU-only PyTorch first (avoids pulling several GB of unused CUDA
+# libraries; Railway has no GPU, so the default GPU build wastes image size)
+RUN pip install --no-cache-dir torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+# Install remaining Python dependencies (prod-only, no training/eval libs)
 COPY requirements-prod.txt .
 RUN pip install --no-cache-dir -r requirements-prod.txt
 # Copy application code
