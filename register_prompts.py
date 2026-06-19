@@ -4,6 +4,9 @@ from prompts import (
     _REVIEW_ANALYSIS_PROMPT_FALLBACK,
     _REVIEW_INTERACTION_PROMPT_FALLBACK,
     _FINAL_REPORT_PROMPT_FALLBACK,
+    _CHAT_MESSAGE_PROMPT_FALLBACK,
+    _CHAT_REPHRASE_PROMPT_FALLBACK,
+    _CHAT_REGENERATE_PROMPT_FALLBACK,
 )
 
 
@@ -17,6 +20,9 @@ def register_all_prompts():
         ("system-prompt", _REVIEW_ANALYSIS_PROMPT_FALLBACK),
         ("review-interaction", _REVIEW_INTERACTION_PROMPT_FALLBACK),
         ("final-report", _FINAL_REPORT_PROMPT_FALLBACK),
+        ("chat-message", _CHAT_MESSAGE_PROMPT_FALLBACK),
+        ("chat-rephrase", _CHAT_REPHRASE_PROMPT_FALLBACK),
+        ("chat-regenerate", _CHAT_REGENERATE_PROMPT_FALLBACK),
     ]:
         client.create_prompt(name=name, prompt=content, labels=["production"])
         print(f"Registered: {name}")

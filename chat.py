@@ -2,6 +2,7 @@ import json
 import re
 import uuid
 from datetime import datetime, timezone
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -9,7 +10,12 @@ from groq import Groq
 
 from auth import get_current_user
 from config import GROQ_API_KEY, ACCEPTED_LANGUAGES, LLM_MODEL
-from prompts import REVIEW_ANALYSIS_PROMPT
+from prompts import (
+    REVIEW_ANALYSIS_PROMPT,
+    CHAT_MESSAGE_PROMPT,
+    CHAT_REPHRASE_PROMPT,
+    CHAT_REGENERATE_PROMPT,
+)
 from redis_client import get_session, save_session, delete_session
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
@@ -25,11 +31,13 @@ class StartSessionRequest(BaseModel):
     language: str
     listing_context: dict
     previous_messages: list[dict] = []
+    purpose: Literal["start", "regenerate"] = "start"
 
 
 class MessageRequest(BaseModel):
     session_id: str
     message: str
+    purpose: Literal["message", "rephrase"] = "message"
 
 
 class ApproveRequest(BaseModel):
@@ -42,20 +50,27 @@ class EndRequest(BaseModel):
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
-def _build_system_prompt(listing_context: dict, language: str = "") -> str:
+def _build_context_block(listing_context: dict, language: str = "") -> str:
     business_name = listing_context.get("business_name", "Unknown Business")
     network_names = listing_context.get("network_names", [])
     network_prefs = listing_context.get("network_preferences", {})
     from config import LANGUAGE_NAMES
     lang_name = LANGUAGE_NAMES.get(language, language)
-    context_block = (
+    return (
         f"\n\nBUSINESS CONTEXT:\n"
         f"- Business Name: {business_name}\n"
         f"- Social Networks: {', '.join(network_names) if network_names else 'None specified'}\n"
         f"- Network Preferences: {network_prefs}\n"
         f"\nUSER LANGUAGE: {lang_name} — ALL your responses must be in {lang_name}.\n"
     )
-    return REVIEW_ANALYSIS_PROMPT + context_block
+
+
+def _build_system_prompt(
+    listing_context: dict,
+    language: str = "",
+    prompt_template: str = REVIEW_ANALYSIS_PROMPT,
+) -> str:
+    return prompt_template + _build_context_block(listing_context, language)
 
 
 def _call_groq(
@@ -95,7 +110,10 @@ async def start_session(
             detail=f"Language must be one of: {', '.join(ACCEPTED_LANGUAGES)}",
         )
 
-    system_prompt = _build_system_prompt(body.listing_context, body.language)
+    prompt_template = (
+        CHAT_REGENERATE_PROMPT if body.purpose == "regenerate" else REVIEW_ANALYSIS_PROMPT
+    )
+    system_prompt = _build_system_prompt(body.listing_context, body.language, prompt_template)
 
     chat_history: list[dict] = [{"role": "system", "content": system_prompt}]
     if body.previous_messages:
@@ -153,13 +171,24 @@ async def send_message(
 
     _assert_session_owner(session, user_id)
 
-    session["chat_history"].append({"role": "user", "content": body.message})
+    prompt_template = CHAT_REPHRASE_PROMPT if body.purpose == "rephrase" else CHAT_MESSAGE_PROMPT
+    call_system_prompt = _build_system_prompt(
+        session.get("listing_context", {}),
+        session.get("detected_language", ""),
+        prompt_template,
+    )
+    call_messages = (
+        [{"role": "system", "content": call_system_prompt}]
+        + session["chat_history"][1:]
+        + [{"role": "user", "content": body.message}]
+    )
 
     try:
-        reply = _call_groq(session["chat_history"])
+        reply = _call_groq(call_messages)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Groq API error: {e}")
 
+    session["chat_history"].append({"role": "user", "content": body.message})
     session["chat_history"].append({"role": "assistant", "content": reply})
     save_session(body.session_id, session)
 
