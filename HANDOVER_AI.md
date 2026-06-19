@@ -1675,3 +1675,38 @@ Multiple times during this deployment, pasting a variable's intended value into 
 Deploy logs at one point showed `"Using baseline Whisper tiny"` rather than the fine-tuned model, despite `USE_FINETUNED_WHISPER=true`. This was **before** the final env var corrections in this session.
 
 **Flag for re-verification on the next deploy:** check deploy logs for the Whisper loading message and confirm it indicates the fine-tuned model (`whisper-provoc-small/final`) is actually loading, not silently falling back to baseline `tiny`.
+
+---
+
+## 30. SESSION 2026-06-19 — PURPOSE-BASED PROMPT ROUTING FOR CHAT/START AND CHAT/MESSAGE
+
+### Problem
+
+`chat.py` previously used ONE system prompt (`REVIEW_ANALYSIS_PROMPT`, Langfuse `"system-prompt"`) for every chat action: initial generation, ongoing chat, rephrase, and regenerate all shared it. This was identified as a contributing root cause (alongside a separate, now-fixed pv-bff bug — see `HANDOVER_BFF.md` — where `previous_messages` was sent by pv-app's regenerate action but never forwarded to pv-ai at all) of regenerate/rephrase appearing to ignore new conversation context or drift inconsistently over repeated calls.
+
+### What changed
+
+- Added 3 new Langfuse-backed prompts to `prompts.py`, same `get_prompt(name, fallback)` pattern as the existing ones:
+  - `"chat-message"` (`CHAT_MESSAGE_PROMPT`) — ongoing conversation turns, no greet/summarize instructions (start-only).
+  - `"chat-rephrase"` (`CHAT_REPHRASE_PROMPT`) — vary wording while preserving meaning/sentiment/rating/key points; incorporate new context if present.
+  - `"chat-regenerate"` (`CHAT_REGENERATE_PROMPT`) — fresh review from the full conversation, prioritizing the most recent details over earlier phrasing/complaints.
+- All 6 prompts (3 original + 3 new) registered live in Langfuse via `register_prompts.py`.
+- `StartSessionRequest` gained `purpose: Literal["start", "regenerate"] = "start"` (default preserves existing fresh/resumed-session behavior using `REVIEW_ANALYSIS_PROMPT` unchanged; `"regenerate"` switches to `CHAT_REGENERATE_PROMPT` regardless of `previous_messages` — this deliberately separates "regenerate" from "resume," which previously shared one ambiguous signal).
+- `MessageRequest` gained `purpose: Literal["message", "rephrase"] = "message"` — this is an intentional behavior change: `/message` previously inherited whatever prompt was baked in at `/start` time; now it always uses `CHAT_MESSAGE_PROMPT` (or `CHAT_REPHRASE_PROMPT`) at call time only. The persisted session `chat_history[0]` is never mutated, so `/approve`'s audit trail is unaffected.
+- `_build_system_prompt()` refactored into a shared `_build_context_block()` helper (BUSINESS CONTEXT/LANGUAGE block) composed with each of the 4 prompt templates, avoiding duplication.
+
+### Outstanding dependency
+
+pv-bff has separate internal methods for regenerate-vs-resume (`startChat()`) and rephrase-vs-message (`sendMessage()`) but does not yet forward a `purpose` field to pv-ai — until pv-bff's DTOs are updated (tracked in `HANDOVER_BFF.md`), regenerate/rephrase calls will silently use the default start/message prompts instead of the dedicated ones. pv-app requires no changes for this — pv-bff's existing handlers already know which case they're in.
+
+### Verification
+
+`test_all.py` 6/6 passing, `final_test.py` end-to-end pass against the live local stack. A direct monkeypatched check (bypassing Groq) confirmed each `purpose` value selects the correct prompt and the persisted system message survives `/message` calls untouched.
+
+### Next step
+
+Update Langfuse with real, tuned prompt text for `chat-message`/`chat-rephrase`/`chat-regenerate` — currently running on their Python fallback text since they're newly created.
+
+### Recurring fragility pattern — second instance (local `.env`)
+
+During this session's testing, `GROQ_API_KEY` in the local `.env` was found overwritten with a stray PowerShell command instead of a real key, causing every chat endpoint to fail locally with a 502 Invalid API Key error. This is the same general class of mistake already documented generically in an earlier section regarding Railway's dashboard UI (pasting a command/wrong value instead of the actual secret) — this is a second, independent occurrence, this time in a local file rather than Railway. No key value is recorded here. Worth treating as a reminder to double check env var values carefully after any copy-paste, in any environment, not just Railway's UI.
