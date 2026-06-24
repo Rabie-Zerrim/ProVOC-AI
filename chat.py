@@ -10,11 +10,12 @@ from groq import Groq
 
 from auth import get_current_user
 from config import GROQ_API_KEY, ACCEPTED_LANGUAGES, LLM_MODEL
+from langfuse_client import get_prompt
 from prompts import (
     REVIEW_ANALYSIS_PROMPT,
-    CHAT_MESSAGE_PROMPT,
-    CHAT_REPHRASE_PROMPT,
-    CHAT_REGENERATE_PROMPT,
+    _CHAT_MESSAGE_PROMPT_FALLBACK,
+    _CHAT_REPHRASE_PROMPT_FALLBACK,
+    _CHAT_REGENERATE_PROMPT_FALLBACK,
 )
 from redis_client import get_session, save_session, delete_session
 
@@ -111,7 +112,9 @@ async def start_session(
         )
 
     prompt_template = (
-        CHAT_REGENERATE_PROMPT if body.purpose == "regenerate" else REVIEW_ANALYSIS_PROMPT
+        get_prompt("chat-regenerate", _CHAT_REGENERATE_PROMPT_FALLBACK)
+        if body.purpose == "regenerate"
+        else REVIEW_ANALYSIS_PROMPT
     )
     system_prompt = _build_system_prompt(body.listing_context, body.language, prompt_template)
 
@@ -171,7 +174,11 @@ async def send_message(
 
     _assert_session_owner(session, user_id)
 
-    prompt_template = CHAT_REPHRASE_PROMPT if body.purpose == "rephrase" else CHAT_MESSAGE_PROMPT
+    prompt_template = (
+        get_prompt("chat-rephrase", _CHAT_REPHRASE_PROMPT_FALLBACK)
+        if body.purpose == "rephrase"
+        else get_prompt("chat-message", _CHAT_MESSAGE_PROMPT_FALLBACK)
+    )
     call_system_prompt = _build_system_prompt(
         session.get("listing_context", {}),
         session.get("detected_language", ""),

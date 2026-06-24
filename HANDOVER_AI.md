@@ -1710,3 +1710,35 @@ Update Langfuse with real, tuned prompt text for `chat-message`/`chat-rephrase`/
 ### Recurring fragility pattern — second instance (local `.env`)
 
 During this session's testing, `GROQ_API_KEY` in the local `.env` was found overwritten with a stray PowerShell command instead of a real key, causing every chat endpoint to fail locally with a 502 Invalid API Key error. This is the same general class of mistake already documented generically in an earlier section regarding Railway's dashboard UI (pasting a command/wrong value instead of the actual secret) — this is a second, independent occurrence, this time in a local file rather than Railway. No key value is recorded here. Worth treating as a reminder to double check env var values carefully after any copy-paste, in any environment, not just Railway's UI.
+
+---
+
+## 31. SESSION 2026-06-24 — PER-REQUEST LANGFUSE FETCHES FOR CHAT-MESSAGE / CHAT-REPHRASE / CHAT-REGENERATE
+
+### Problem
+
+`CHAT_MESSAGE_PROMPT`, `CHAT_REPHRASE_PROMPT`, and `CHAT_REGENERATE_PROMPT` were module-level constants assigned once at process startup via `get_prompt()` in `prompts.py`. Updating these prompts in Langfuse and redeploying had no effect: the new Railway process imported the module, froze the string, and never fetched again. Only `system-prompt` (used for `/start` normal flow) and the two dead-code prompts had this problem in practice, but all three new prompts were affected identically.
+
+Root cause confirmed by debug prints added temporarily to `chat.py`: both `/start` and `/message` printed the frozen fallback text — identical to what was registered in Langfuse, but read zero times after startup.
+
+### What changed
+
+**`chat.py` only — `prompts.py` untouched:**
+
+- Removed the three frozen constant imports (`CHAT_MESSAGE_PROMPT`, `CHAT_REPHRASE_PROMPT`, `CHAT_REGENERATE_PROMPT`) from the `from prompts import (...)` block.
+- Added `from langfuse_client import get_prompt` and imported the three `_*_FALLBACK` strings instead.
+- In `start_session()` (`/start`, `purpose == "regenerate"` branch): replaced `CHAT_REGENERATE_PROMPT` with an inline `get_prompt("chat-regenerate", _CHAT_REGENERATE_PROMPT_FALLBACK)` call.
+- In `send_message()` (`/message`): replaced the single-line ternary with a two-branch ternary, each branch calling `get_prompt()` live — `get_prompt("chat-rephrase", _CHAT_REPHRASE_PROMPT_FALLBACK)` or `get_prompt("chat-message", _CHAT_MESSAGE_PROMPT_FALLBACK)`.
+- Removed two temporary debug `print()` lines added in the previous session.
+
+`REVIEW_ANALYSIS_PROMPT` (Langfuse key `"system-prompt"`, used for `/start` normal flow) is **not changed** — still a module-level constant. Changing it was out of scope and carries higher risk since it is the primary system prompt.
+
+### Behaviour after fix
+
+Every call to `POST /api/chat/message` and every `POST /api/chat/start` with `purpose == "regenerate"` now calls `get_prompt()` at request time. The Langfuse Python SDK has its own internal TTL cache (default ~60 s), so updates to Langfuse propagate within ~1 minute without requiring a redeploy or restart.
+
+`/start` with `purpose == "start"` (the normal, non-regenerate path) continues to use the frozen `REVIEW_ANALYSIS_PROMPT` constant — unchanged.
+
+### Deployment
+
+Committed on `dev` branch and pushed to Railway. Railway auto-deploys from `dev`. After the deploy, a Langfuse prompt update for `chat-message`, `chat-rephrase`, or `chat-regenerate` takes effect within the SDK's TTL window (~60 s) with no further action required.
