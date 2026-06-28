@@ -27,7 +27,11 @@ class TasteEngine:
         if self._initialized:
             return
         try:
-            self._client = MilvusClient(uri=config.MILVUS_URI)
+            uri = config.MILVUS_URI
+            token = None
+            if "?token=" in uri:
+                uri, token = uri.split("?token=", 1)
+            self._client = MilvusClient(uri=uri, token=token)
             self._encoder = SentenceTransformer("all-MiniLM-L6-v2")
             self._ensure_collection()
             self._initialized = True
