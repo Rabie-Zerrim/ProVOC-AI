@@ -24,6 +24,7 @@ WHISPER_MODEL = os.getenv("WHISPER_MODEL", "tiny")
 LLM_MODEL = os.getenv("LLM_MODEL", "llama-3.3-70b-versatile")
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
+MILVUS_URI = os.getenv("MILVUS_URI", "http://localhost:19530")
 
 # Database configuration
 DATABASE_URL = os.getenv("DATABASE_URL")

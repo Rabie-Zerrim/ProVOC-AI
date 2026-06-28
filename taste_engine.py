@@ -1,6 +1,7 @@
 from pymilvus import MilvusClient, DataType
 from sentence_transformers import SentenceTransformer
 import logging
+import config
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +27,7 @@ class TasteEngine:
         if self._initialized:
             return
         try:
-            self._client = MilvusClient(uri="http://localhost:19530")
+            self._client = MilvusClient(uri=config.MILVUS_URI)
             self._encoder = SentenceTransformer("all-MiniLM-L6-v2")
             self._ensure_collection()
             self._initialized = True
