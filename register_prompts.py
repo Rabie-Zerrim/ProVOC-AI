@@ -7,6 +7,7 @@ from prompts import (
     _CHAT_MESSAGE_PROMPT_FALLBACK,
     _CHAT_REPHRASE_PROMPT_FALLBACK,
     _CHAT_REGENERATE_PROMPT_FALLBACK,
+    _CHAT_RESUME_PROMPT_FALLBACK,
 )
 
 
@@ -23,6 +24,7 @@ def register_all_prompts():
         ("chat-message", _CHAT_MESSAGE_PROMPT_FALLBACK),
         ("chat-rephrase", _CHAT_REPHRASE_PROMPT_FALLBACK),
         ("chat-regenerate", _CHAT_REGENERATE_PROMPT_FALLBACK),
+        ("chat-resume", _CHAT_RESUME_PROMPT_FALLBACK),
     ]:
         client.create_prompt(name=name, prompt=content, labels=["production"])
         print(f"Registered: {name}")

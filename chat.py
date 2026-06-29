@@ -2,7 +2,7 @@ import json
 import re
 import uuid
 from datetime import datetime, timezone
-from typing import Literal
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -16,6 +16,7 @@ from prompts import (
     _CHAT_MESSAGE_PROMPT_FALLBACK,
     _CHAT_REPHRASE_PROMPT_FALLBACK,
     _CHAT_REGENERATE_PROMPT_FALLBACK,
+    _CHAT_RESUME_PROMPT_FALLBACK,
 )
 from redis_client import get_session, save_session, delete_session
 
@@ -33,6 +34,7 @@ class StartSessionRequest(BaseModel):
     listing_context: dict
     previous_messages: list[dict] = []
     purpose: Literal["start", "regenerate"] = "start"
+    conversation_summary: Optional[str] = None
 
 
 class MessageRequest(BaseModel):
@@ -111,12 +113,22 @@ async def start_session(
             detail=f"Language must be one of: {', '.join(ACCEPTED_LANGUAGES)}",
         )
 
-    prompt_template = (
-        get_prompt("chat-regenerate", _CHAT_REGENERATE_PROMPT_FALLBACK)
-        if body.purpose == "regenerate"
-        else REVIEW_ANALYSIS_PROMPT
-    )
-    system_prompt = _build_system_prompt(body.listing_context, body.language, prompt_template)
+    if body.conversation_summary:
+        resume_template = get_prompt("chat-resume", _CHAT_RESUME_PROMPT_FALLBACK)
+        system_prompt = (
+            resume_template
+            .replace("{{business_name}}", body.listing_context.get("business_name", ""))
+            .replace("{{conversation_summary}}", body.conversation_summary)
+            .replace("{{review_text}}", body.transcript)
+            .replace("{{language}}", body.language)
+        )
+    else:
+        prompt_template = (
+            get_prompt("chat-regenerate", _CHAT_REGENERATE_PROMPT_FALLBACK)
+            if body.purpose == "regenerate"
+            else REVIEW_ANALYSIS_PROMPT
+        )
+        system_prompt = _build_system_prompt(body.listing_context, body.language, prompt_template)
 
     chat_history: list[dict] = [{"role": "system", "content": system_prompt}]
     if body.previous_messages:
