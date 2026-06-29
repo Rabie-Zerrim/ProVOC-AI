@@ -16,6 +16,7 @@ from tasks import router as tasks_router
 from chat import router as chat_router
 from transcription import router as transcription_router
 from recommendations import router as recommendations_router
+from filter import router as filter_router
 
 milvus_client = get_milvus()
 
@@ -153,6 +154,7 @@ app.include_router(tasks_router)
 app.include_router(chat_router)
 app.include_router(transcription_router)
 app.include_router(recommendations_router)
+app.include_router(filter_router)
 
 
 if __name__ == "__main__":
