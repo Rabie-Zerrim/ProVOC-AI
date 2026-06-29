@@ -33,7 +33,7 @@ async def filter_text(
     body: FilterRequest,
     user_id: str = Depends(get_current_user),
 ):
-    prompt = _FILTER_PROMPT.format(text=body.text)
+    prompt = _FILTER_PROMPT.replace("{text}", body.text)
     try:
         response = _groq.chat.completions.create(
             model=LLM_MODEL,
