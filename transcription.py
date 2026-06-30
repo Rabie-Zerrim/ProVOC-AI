@@ -85,6 +85,8 @@ async def transcribe_audio(
                     model="whisper-large-v3-turbo",
                     response_format="verbose_json",
                 )
+            print(f"[groq] transcription text: '{groq_result.text}'")
+            print(f"[groq] transcription language: '{groq_result.language}'")
             transcription = groq_result.text.strip()
             detected_language = groq_result.language
             confidence = None
