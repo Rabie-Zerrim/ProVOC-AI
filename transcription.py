@@ -78,8 +78,10 @@ async def transcribe_audio(
 
         if USE_GROQ_WHISPER:
             with open(temp_filename, "rb") as f:
+                filename = audio.filename or temp_filename
+                safe_filename = filename if filename.endswith(('.m4a', '.mp3', '.wav', '.mp4', '.webm')) else filename + '.m4a'
                 groq_result = _groq_whisper.audio.transcriptions.create(
-                    file=(audio.filename or temp_filename, f.read()),
+                    file=(safe_filename, f.read()),
                     model="whisper-large-v3-turbo",
                     response_format="verbose_json",
                 )
