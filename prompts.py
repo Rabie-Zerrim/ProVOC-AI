@@ -154,3 +154,17 @@ CHAT_RESUME_PROMPT = get_prompt(
     "chat-resume",
     _CHAT_RESUME_PROMPT_FALLBACK,
 )
+
+# 8. CONTENT FILTER PROMPT
+_FILTER_PROMPT_FALLBACK = (
+    'You are a content moderation assistant. Analyze the following review text and classify it.\n'
+    'Return ONLY a JSON object with no extra text, no markdown, no backticks:\n'
+    '- If the text contains profanity, hate speech, slurs, or discriminatory language:\n'
+    '  {"result": "block", "reason": "inappropriate_content"}\n'
+    '- If the text is aggressive, hostile, or excessively negative in tone but contains no slurs:\n'
+    '  {"result": "warn", "suggestion": "Consider rephrasing in a more constructive way"}\n'
+    '- If the text is acceptable:\n'
+    '  {"result": "ok"}\n\n'
+    'Review text:\n'
+    '"""{text}"""'
+)

@@ -6,22 +6,11 @@ from pydantic import BaseModel
 
 from auth import get_current_user
 from config import GROQ_API_KEY, LLM_MODEL
+from langfuse_client import get_prompt
+from prompts import _FILTER_PROMPT_FALLBACK
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 _groq = Groq(api_key=GROQ_API_KEY)
-
-_FILTER_PROMPT = (
-    'You are a content moderation assistant. Analyze the following review text and classify it.\n'
-    'Return ONLY a JSON object with no extra text, no markdown, no backticks:\n'
-    '- If the text contains profanity, hate speech, slurs, or discriminatory language:\n'
-    '  {"result": "block", "reason": "inappropriate_content"}\n'
-    '- If the text is aggressive, hostile, or excessively negative in tone but contains no slurs:\n'
-    '  {"result": "warn", "suggestion": "Consider rephrasing in a more constructive way"}\n'
-    '- If the text is acceptable:\n'
-    '  {"result": "ok"}\n\n'
-    'Review text:\n'
-    '"""{text}"""'
-)
 
 
 class FilterRequest(BaseModel):
@@ -33,7 +22,8 @@ async def filter_text(
     body: FilterRequest,
     user_id: str = Depends(get_current_user),
 ):
-    prompt = _FILTER_PROMPT.replace("{text}", body.text)
+    filter_prompt = get_prompt("chat-filter", _FILTER_PROMPT_FALLBACK)
+    prompt = filter_prompt.replace("{text}", body.text)
     try:
         response = _groq.chat.completions.create(
             model=LLM_MODEL,
