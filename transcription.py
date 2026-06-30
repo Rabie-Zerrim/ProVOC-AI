@@ -89,7 +89,7 @@ async def transcribe_audio(
             print(f"[groq] transcription language: '{groq_result.language}'")
             transcription = groq_result.text.strip()
             _lang_map = {"english": "en", "french": "fr", "spanish": "es"}
-            detected_language = _lang_map.get(groq_result.language, groq_result.language)
+            detected_language = _lang_map.get(groq_result.language.lower(), groq_result.language)
             confidence = None
             print(f"Groq Whisper: lang={detected_language}")
         elif USE_FINETUNED and ft_model is not None:
