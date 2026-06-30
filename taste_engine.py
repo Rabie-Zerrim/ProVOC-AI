@@ -141,11 +141,18 @@ class TasteEngine:
                     "business_name": b["business_name"],
                     "business_id": bid,
                     "score": round(sim, 3),
+                    "rating": b.get("rating"),
                 })
 
             # Step 6: Sort by similarity and return top N
             scored.sort(key=lambda x: x["score"], reverse=True)
-            return scored[:limit]
+            results = scored[:limit]
+
+            print(f"[recommendations] returning {len(results)} results")
+            for r in results:
+                print(f"[recommendations] item: {r}")
+
+            return results
 
         except Exception as e:
             logger.warning(f"Failed to get recommendations: {e}")
