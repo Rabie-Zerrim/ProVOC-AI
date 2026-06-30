@@ -32,11 +32,13 @@ async def filter_text(
             max_tokens=128,
             response_format={"type": "json_object"},
         )
-        data = json.loads(response.choices[0].message.content.strip())
+        raw_response = response.choices[0].message.content.strip()
+        print(f"[filter] raw groq response: {raw_response}")
+        data = json.loads(raw_response)
+        result = data.get("result", "ok")
+        print(f"[filter] parsed result: {result}")
     except Exception:
         return {"approved": True}
-
-    result = data.get("result", "ok")
     if result == "block":
         return {"approved": False, "reason": "inappropriate_content"}
     if result == "warn":
