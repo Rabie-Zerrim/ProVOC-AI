@@ -4,14 +4,21 @@ import asyncio
 import whisper
 import torch
 from fastapi import APIRouter, UploadFile, File, HTTPException, Form
+from groq import Groq
 
-from config import ACCEPTED_LANGUAGES, WHISPER_MODEL
+from config import ACCEPTED_LANGUAGES, WHISPER_MODEL, GROQ_API_KEY
 
 router = APIRouter(prefix="/api", tags=["transcription"])
 
+USE_GROQ_WHISPER = os.getenv("GROQ_WHISPER", "false").lower() == "true"
+_groq_whisper = Groq(api_key=GROQ_API_KEY)
+
 device = "cuda" if torch.cuda.is_available() else "cpu"
-print(f"Loading Whisper on {device}...")
-whisper_model = whisper.load_model(WHISPER_MODEL).to(device)
+if not USE_GROQ_WHISPER:
+    print(f"Loading Whisper on {device}...")
+    whisper_model = whisper.load_model(WHISPER_MODEL).to(device)
+else:
+    whisper_model = None
 
 USE_FINETUNED = os.getenv("USE_FINETUNED_WHISPER", "false").lower() == "true"
 FINETUNED_PATH = os.getenv("FINETUNED_WHISPER_PATH", "./whisper-provoc-small/final")
@@ -69,7 +76,18 @@ async def transcribe_audio(
         content = await audio.read()
         await asyncio.to_thread(_write_file, temp_filename, content)
 
-        if USE_FINETUNED and ft_model is not None:
+        if USE_GROQ_WHISPER:
+            with open(temp_filename, "rb") as f:
+                groq_result = _groq_whisper.audio.transcriptions.create(
+                    file=(audio.filename or temp_filename, f.read()),
+                    model="whisper-large-v3-turbo",
+                    response_format="verbose_json",
+                )
+            transcription = groq_result.text.strip()
+            detected_language = groq_result.language
+            confidence = None
+            print(f"Groq Whisper: lang={detected_language}")
+        elif USE_FINETUNED and ft_model is not None:
             import librosa
             import numpy as np
             audio_array, _ = librosa.load(temp_filename, sr=16000)
